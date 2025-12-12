@@ -1,10 +1,12 @@
 {
   "language": "en_US",
   "words": [
+    "Anson",
     "Bxxxxxxxxx",
     "Bxxxxxxxxxxx",
     "capfd",
     "charliermarsh",
+    "cooldown",
     "Cosense",
     "docformat",
     "gruntfuggly",
@@ -19,12 +21,15 @@
     "pdoc",
     "peaceiris",
     "pydantic",
+    "pydocstyle",
     "pymarkdown",
     "pymarkdownlnt",
     "pypi",
     "pytest",
     "scrapbox",
-    "tombi"
+    "sdist",
+    "tombi",
+    "venv"
   ],
   "dictionaries": [
     "companies",

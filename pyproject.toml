@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "scrapbox-client"
 dynamic = ["version"]
-description = "Scrapbox (Helpfeel Cosence) API Client"
+description = "Scrapbox (Helpfeel Cosense) API Client"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
