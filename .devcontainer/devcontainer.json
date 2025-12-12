@@ -53,7 +53,7 @@
         },
         "github.copilot.chat.reviewSelection.instructions": [
           {
-            "file": ".github/instructions/review.instructions.md"
+            "file": ".github/instructions/review.md"
           }
         ]
       }
