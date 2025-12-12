@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -165,3 +166,129 @@ class TestCLI:
         assert "bulk-pages" in captured.out
         assert "--batch-size" in captured.out
         assert "Project name" in captured.out
+
+
+class TestConnectSidPriority:
+    """Test connect.sid priority logic."""
+
+    PROJECT_NAME = "help-jp"
+
+    def test_connect_sid_from_argument(self, tmp_path: Path) -> None:
+        """Test that --connect-sid argument takes priority."""
+        # Create a file with different sid
+        sid_file = tmp_path / "test.sid"
+        sid_file.write_text("file-sid-value")
+
+        with patch("scrapbox.main.ScrapboxClient") as mock_client:
+            mock_instance = MagicMock()
+            mock_client.return_value.__enter__.return_value = mock_instance
+            mock_instance.get_pages.return_value = MagicMock(
+                project_name=self.PROJECT_NAME,
+                count=0,
+                skip=0,
+                limit=100,
+                pages=[],
+            )
+
+            main(test_args=["--connect-sid", "arg-sid-value", "pages", self.PROJECT_NAME])
+
+            # Verify ScrapboxClient was called with the argument value
+            mock_client.assert_called_once_with(connect_sid="arg-sid-value")
+
+    def test_connect_sid_from_file(self, tmp_path: Path) -> None:
+        """Test that --connect-sid-file is used when --connect-sid is not provided."""
+        sid_file = tmp_path / "test.sid"
+        sid_file.write_text("file-sid-value\n")
+
+        with patch("scrapbox.main.ScrapboxClient") as mock_client:
+            mock_instance = MagicMock()
+            mock_client.return_value.__enter__.return_value = mock_instance
+            mock_instance.get_pages.return_value = MagicMock(
+                project_name=self.PROJECT_NAME,
+                count=0,
+                skip=0,
+                limit=100,
+                pages=[],
+            )
+
+            main(test_args=["--connect-sid-file", str(sid_file), "pages", self.PROJECT_NAME])
+
+            # Verify ScrapboxClient was called with the file value (stripped)
+            mock_client.assert_called_once_with(connect_sid="file-sid-value")
+
+    def test_connect_sid_from_default_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that default ~/.config/sbc/connect.sid is used when no arguments provided."""
+        # Mock Path.home() to return tmp_path
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+        # Create default config directory and file
+        config_dir = tmp_path / ".config" / "sbc"
+        config_dir.mkdir(parents=True)
+        default_sid_file = config_dir / "connect.sid"
+        default_sid_file.write_text("default-sid-value\n")
+
+        with patch("scrapbox.main.ScrapboxClient") as mock_client:
+            mock_instance = MagicMock()
+            mock_client.return_value.__enter__.return_value = mock_instance
+            mock_instance.get_pages.return_value = MagicMock(
+                project_name=self.PROJECT_NAME,
+                count=0,
+                skip=0,
+                limit=100,
+                pages=[],
+            )
+
+            main(test_args=["pages", self.PROJECT_NAME])
+
+            # Verify ScrapboxClient was called with the default file value
+            mock_client.assert_called_once_with(connect_sid="default-sid-value")
+
+    def test_connect_sid_none_when_no_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that connect_sid is None when no file exists."""
+        # Mock Path.home() to return tmp_path (no .config/sbc/connect.sid exists)
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+        with patch("scrapbox.main.ScrapboxClient") as mock_client:
+            mock_instance = MagicMock()
+            mock_client.return_value.__enter__.return_value = mock_instance
+            mock_instance.get_pages.return_value = MagicMock(
+                project_name=self.PROJECT_NAME,
+                count=0,
+                skip=0,
+                limit=100,
+                pages=[],
+            )
+
+            main(test_args=["pages", self.PROJECT_NAME])
+
+            # Verify ScrapboxClient was called with None
+            mock_client.assert_called_once_with(connect_sid=None)
+
+    def test_connect_sid_file_not_exists(self, tmp_path: Path) -> None:
+        """Test that connect_sid is None when specified file doesn't exist."""
+        non_existent_file = tmp_path / "non_existent.sid"
+
+        with patch("scrapbox.main.ScrapboxClient") as mock_client:
+            mock_instance = MagicMock()
+            mock_client.return_value.__enter__.return_value = mock_instance
+            mock_instance.get_pages.return_value = MagicMock(
+                project_name=self.PROJECT_NAME,
+                count=0,
+                skip=0,
+                limit=100,
+                pages=[],
+            )
+
+            main(test_args=["--connect-sid-file", str(non_existent_file), "pages", self.PROJECT_NAME])
+
+            # Verify ScrapboxClient was called with None since file doesn't exist
+            mock_client.assert_called_once_with(connect_sid=None)
+
+    def test_connect_sid_argument_priority_over_file(self, tmp_path: Path) -> None:
+        """Test that --connect-sid has priority over --connect-sid-file."""
+        # Note: These are mutually exclusive, so this test verifies the argument parser behavior
+        # We can't actually pass both arguments, but we can verify the mutual exclusivity
+        with pytest.raises(SystemExit):
+            main(
+                test_args=["--connect-sid", "arg-value", "--connect-sid-file", "file-path", "pages", self.PROJECT_NAME]
+            )

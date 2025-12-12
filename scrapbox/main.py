@@ -38,7 +38,7 @@ def create_parser() -> argparse.ArgumentParser:
     )
     auth_group.add_argument(
         "--connect-sid-file",
-        help="Path to file containing connect.sid (default: ~/.config/scrapbox-client/connect.sid)",
+        help="Path to file containing connect.sid (default: ~/.config/sbc/connect.sid)",
         default=None,
     )
 
@@ -225,7 +225,19 @@ def main(*, test_args: list[str] | None = None) -> int:
         parser.print_help()
         return 1
 
-    with ScrapboxClient(connect_sid=args.connect_sid) as client:
+    connect_sid: str | None = None
+    if args.connect_sid:
+        connect_sid = args.connect_sid
+    elif args.connect_sid_file:
+        sid_file = Path(args.connect_sid_file)
+        if sid_file.exists():
+            connect_sid = sid_file.read_text().strip()
+    else:
+        default_sid_file = Path.home() / ".config" / "sbc" / "connect.sid"
+        if default_sid_file.exists():
+            connect_sid = default_sid_file.read_text().strip()
+
+    with ScrapboxClient(connect_sid=connect_sid) as client:
         if args.command == "pages":
             return cmd_pages(client, args)
         if args.command == "bulk-pages":
