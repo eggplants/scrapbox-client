@@ -1,6 +1,7 @@
 """CLI for Scrapbox client."""
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from textwrap import dedent
@@ -40,10 +41,28 @@ def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Scrapbox API client CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=dedent(
+            """
+            examples:
+              sbc pages my-project --limit 10
+              sbc all-pages my-project --batch-size 500
+              sbc page my-project "Page Title"
+              sbc text my-project "Page Title" --output page.txt
+              sbc icon my-project "Page Title"
+              sbc file 60190edf1176d9001c13f8e8.png --output image.png
+
+            priority of `connect.sid` source:
+              1. --connect-sid argument
+              2. --connect-sid-file argument
+              3. ~/.config/sbc/connect.sid file
+              4. SBC_CONNECT_SID environment variable
+            """
+        ),
     )
     # version
     parser.add_argument(
         "--version",
+        "-V",
         action="version",
         version=f"sbc {__version__}",
         help="Show program's version number and exit",
@@ -300,6 +319,9 @@ def get_connect_sid(args: argparse.Namespace) -> str | None:
     default_sid_file = Path.home() / ".config" / "sbc" / "connect.sid"
     if default_sid_file.exists():
         return default_sid_file.read_text().strip()
+
+    if "SBC_CONNECT_SID" in os.environ:
+        return os.environ["SBC_CONNECT_SID"]
 
     return None
 

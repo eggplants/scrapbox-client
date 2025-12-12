@@ -38,11 +38,25 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
-  --version             Show program's version number and exit
+  --version, -V         Show program's version number and exit
   --connect-sid CONNECT_SID
                         Scrapbox authentication cookie (connect.sid)
   --connect-sid-file CONNECT_SID_FILE
-                        Path to file containing connect.sid (default: ~/.config/scrapbox-client/connect.sid)
+                        Path to file containing connect.sid (default: ~/.config/sbc/connect.sid)
+
+examples:
+  sbc pages my-project --limit 10
+  sbc all-pages my-project --batch-size 500
+  sbc page my-project "Page Title"
+  sbc text my-project "Page Title" --output page.txt
+  sbc icon my-project "Page Title"
+  sbc file 60190edf1176d9001c13f8e8.png --output image.png
+
+priority of `connect.sid` source:
+  1. --connect-sid argument
+  2. --connect-sid-file argument
+  3. ~/.config/sbc/connect.sid file
+  4. SBC_CONNECT_SID environment variable
 ```
 
 ## Library
