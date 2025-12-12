@@ -118,13 +118,15 @@ def cmd_pages(client: ScrapboxClient, args: argparse.Namespace) -> int:
     """
     try:
         pages = client.get_pages(args.project, skip=args.skip, limit=args.limit)
-        output = dedent(f"""
+        output = dedent(
+            f"""
             ===
             Project: {pages.project_name}
             Total pages: {pages.count}
             Skip: {pages.skip}, Limit: {pages.limit}
             ===
-            """)
+            """
+        )
         for page in pages.pages:
             output += f"- {page.title} (views: {page.views}, updated: {page.updated})\n"
         print(output.rstrip())
@@ -165,12 +167,14 @@ def cmd_all_pages(client: ScrapboxClient, args: argparse.Namespace) -> int:
             if skip >= pages.count:
                 break
 
-        output = dedent(f"""
+        output = dedent(
+            f"""
             ===
             Project: {pages.project_name}
             Total pages: {len(all_pages)}
             ===
-            """)
+            """
+        )
         for page in all_pages:
             output += f"- {page.title} (views: {page.views}, updated: {page.updated})\n"
         print(output.rstrip())
@@ -192,7 +196,8 @@ def cmd_page(client: ScrapboxClient, args: argparse.Namespace) -> int:
     """
     try:
         page = client.get_page(args.project, args.title)
-        output = dedent(f"""
+        output = dedent(
+            f"""
             ===
             Title: {page.title}
             ID: {page.id}
@@ -204,7 +209,8 @@ def cmd_page(client: ScrapboxClient, args: argparse.Namespace) -> int:
             ===
 
             Content:
-            """)
+            """
+        )
         for line in page.lines:
             output += f"  {line.text}\n"
         print(output.rstrip())
