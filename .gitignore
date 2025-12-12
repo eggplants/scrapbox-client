@@ -6,6 +6,11 @@ dist/
 wheels/
 *.egg-info
 
+# Coverage
+.coverage
+pytest-coverage.txt
+pytest.xml
+
 # Virtual environments
 .venv
 

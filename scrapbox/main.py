@@ -9,6 +9,25 @@ from . import __version__
 from .client import ScrapboxClient
 
 
+def check_output_path(path_str: str) -> str:
+    """Check if the output path is valid.
+
+    Args:
+        path_str: The output path string.
+
+    Returns:
+        The validated output path string.
+    """
+    path = Path(path_str)
+    if path.exists() and path.is_dir():
+        msg = f"Output path '{path_str}' is a directory."
+        raise argparse.ArgumentTypeError(msg)
+    if not path.parent.exists():
+        msg = f"Parent directory of '{path_str}' does not exist."
+        raise argparse.ArgumentTypeError(msg)
+    return path_str
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Create argument parser for CLI.
 
@@ -49,34 +68,40 @@ def create_parser() -> argparse.ArgumentParser:
     pages_parser.add_argument("project", help="Project name")
     pages_parser.add_argument("--skip", type=int, default=0, help="Number of pages to skip")
     pages_parser.add_argument("--limit", type=int, default=100, help="Number of pages to retrieve")
+    pages_parser.set_defaults(handler=cmd_pages)
 
-    # bulk-pages command
-    bulk_pages_parser = subparsers.add_parser("bulk-pages", help="Get all pages from a project")
-    bulk_pages_parser.add_argument("project", help="Project name")
-    bulk_pages_parser.add_argument(
+    # all-pages command
+    all_pages_parser = subparsers.add_parser("all-pages", help="Get all pages from a project")
+    all_pages_parser.add_argument("project", help="Project name")
+    all_pages_parser.add_argument(
         "--batch-size", type=int, default=1000, help="Number of pages to fetch per batch (default: 1000)"
     )
+    all_pages_parser.set_defaults(handler=cmd_all_pages)
 
     # page command
     page_parser = subparsers.add_parser("page", help="Get detailed information about a page")
     page_parser.add_argument("project", help="Project name")
     page_parser.add_argument("title", help="Page title")
+    page_parser.set_defaults(handler=cmd_page)
 
     # text command
     text_parser = subparsers.add_parser("text", help="Get text content of a page")
     text_parser.add_argument("project", help="Project name")
     text_parser.add_argument("title", help="Page title")
-    text_parser.add_argument("--output", "-o", help="Output file path (default: stdout)")
+    text_parser.add_argument("--output", "-o", type=check_output_path, help="Output file path (default: stdout)")
+    text_parser.set_defaults(handler=cmd_text)
 
     # icon command
     icon_parser = subparsers.add_parser("icon", help="Get icon URL for a page")
     icon_parser.add_argument("project", help="Project name")
     icon_parser.add_argument("title", help="Page title")
+    icon_parser.set_defaults(handler=cmd_icon)
 
     # file command
     file_parser = subparsers.add_parser("file", help="Download a file from Scrapbox")
     file_parser.add_argument("file_id", help="File ID or full URL")
-    file_parser.add_argument("--output", "-o", required=True, help="Output file path")
+    file_parser.add_argument("--output", "-o", required=True, type=check_output_path, help="Output file path")
+    file_parser.set_defaults(handler=cmd_file)
 
     return parser
 
@@ -109,8 +134,8 @@ def cmd_pages(client: ScrapboxClient, args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_bulk_pages(client: ScrapboxClient, args: argparse.Namespace) -> int:
-    """Execute bulk-pages command.
+def cmd_all_pages(client: ScrapboxClient, args: argparse.Namespace) -> int:
+    """Execute all-pages command.
 
     Args:
         client: ScrapboxClient instance.
@@ -212,6 +237,67 @@ def cmd_text(client: ScrapboxClient, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_icon(client: ScrapboxClient, args: argparse.Namespace) -> int:
+    """Execute icon command.
+
+    Args:
+        client: ScrapboxClient instance.
+        args: Parsed command-line arguments.
+
+    Returns:
+        Exit code.
+    """
+    try:
+        print(client.get_page_icon_url(args.project, args.title))
+    except Exception as e:  # noqa: BLE001
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_file(client: ScrapboxClient, args: argparse.Namespace) -> int:
+    """Execute file command.
+
+    Args:
+        client: ScrapboxClient instance.
+        args: Parsed command-line arguments.
+
+    Returns:
+        Exit code.
+    """
+    try:
+        Path(args.output).write_bytes(client.get_file(args.file_id))
+        print(f"Downloaded to {args.output}", file=sys.stderr)
+    except Exception as e:  # noqa: BLE001
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def get_connect_sid(args: argparse.Namespace) -> str | None:
+    """Get connect.sid from arguments or default location.
+
+    Args:
+        args: Parsed command-line arguments.
+
+    Returns:
+        The connect.sid string or None if not found.
+    """
+    if args.connect_sid:
+        return args.connect_sid
+
+    if args.connect_sid_file:
+        sid_file = Path(args.connect_sid_file)
+        if sid_file.exists():
+            return sid_file.read_text().strip()
+
+    default_sid_file = Path.home() / ".config" / "sbc" / "connect.sid"
+    if default_sid_file.exists():
+        return default_sid_file.read_text().strip()
+
+    return None
+
+
 def main(*, test_args: list[str] | None = None) -> int:
     """Main entry point for CLI.
 
@@ -221,31 +307,12 @@ def main(*, test_args: list[str] | None = None) -> int:
     parser = create_parser()
     args = parser.parse_args(test_args) if test_args is not None else parser.parse_args()
 
-    if not args.command:
+    if not hasattr(args, "handler"):
         parser.print_help()
         return 1
 
-    connect_sid: str | None = None
-    if args.connect_sid:
-        connect_sid = args.connect_sid
-    elif args.connect_sid_file:
-        sid_file = Path(args.connect_sid_file)
-        if sid_file.exists():
-            connect_sid = sid_file.read_text().strip()
-    else:
-        default_sid_file = Path.home() / ".config" / "sbc" / "connect.sid"
-        if default_sid_file.exists():
-            connect_sid = default_sid_file.read_text().strip()
-
-    with ScrapboxClient(connect_sid=connect_sid) as client:
-        if args.command == "pages":
-            return cmd_pages(client, args)
-        if args.command == "bulk-pages":
-            return cmd_bulk_pages(client, args)
-        if args.command == "page":
-            return cmd_page(client, args)
-        if args.command == "text":
-            return cmd_text(client, args)
+    with ScrapboxClient(connect_sid=get_connect_sid(args)) as client:
+        return args.handler(client, args)
 
     return 0
 

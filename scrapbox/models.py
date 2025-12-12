@@ -1,6 +1,8 @@
 """Scrapbox API response models."""
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, RootModel
 from pydantic.alias_generators import to_camel
 
 
@@ -87,3 +89,30 @@ class PageDetail(BaseModel):
     helpfeels: list[str]
     persistent: bool
     lines: list[Line]
+
+
+class GyazoOEmbedResponsePhoto(BaseModel):
+    """Photo information in the Gyazo oEmbed response."""
+
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, populate_by_name=True)
+
+    type: Literal["photo"]
+    version: Literal["1.0"]
+    provider_name: str
+    provider_url: str
+    url: str
+    width: int
+    height: int
+    scale: float
+    title: str
+
+
+class GyazoOEmbedResponse(RootModel[GyazoOEmbedResponsePhoto]):
+    """Response from the Gyazo oEmbed API.
+
+    See: https://gyazo.com/api/docs/image#oembed
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, populate_by_name=True)
+
+    root: GyazoOEmbedResponsePhoto

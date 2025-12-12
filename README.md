@@ -22,15 +22,15 @@ pip install scrapbox-client
 
 ```shellsession
 $ sbc
-usage: sbc [-h] [--version] [--connect-sid CONNECT_SID | --connect-sid-file CONNECT_SID_FILE] {pages,bulk-pages,page,text,icon,file} ...
+usage: sbc [-h] [--version] [--connect-sid CONNECT_SID | --connect-sid-file CONNECT_SID_FILE] {pages,all-pages,page,text,icon,file} ...
 
 Scrapbox API client CLI
 
 positional arguments:
-  {pages,bulk-pages,page,text,icon,file}
+  {pages,all-pages,page,text,icon,file}
                         Available commands
     pages               Get page list from a project
-    bulk-pages          Get all pages from a project
+    all-pages           Get all pages from a project
     page                Get detailed information about a page
     text                Get text content of a page
     icon                Get icon URL for a page

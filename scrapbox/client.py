@@ -5,7 +5,7 @@ from urllib.parse import quote, urlparse
 
 import httpx
 
-from .models import PageDetail, PageListResponse
+from .models import GyazoOEmbedResponse, PageDetail, PageListResponse
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -142,14 +142,12 @@ class ScrapboxClient:
             oembed_url = f"{self.BASE_URL}/oembed-proxy/gyazo"
             response = self.client.get(oembed_url, params={"url": url})
             response.raise_for_status()
-            oembed_data = response.json()
-            actual_url = oembed_data.get("url")
-            if not actual_url:
-                msg = f"No URL found in oembed response for {url}"
+            json = response.json()
+            if oembed_type := json.get("type") != "photo":
+                msg = f"Unsupported Gyazo oEmbed type: {oembed_type}"
                 raise ValueError(msg)
-
-            url = actual_url
-
+            oembed_data = GyazoOEmbedResponse.model_validate(json)
+            url = oembed_data.root.url
         response = self.client.get(url)
         response.raise_for_status()
 

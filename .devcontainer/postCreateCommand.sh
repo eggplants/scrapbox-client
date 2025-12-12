@@ -9,6 +9,7 @@ fi
 
 mise trust
 mise install
+mise generate git-pre-commit --write
 eval "$(mise activate zsh)"
 
 cat<<'A'>> ~/.zshrc
