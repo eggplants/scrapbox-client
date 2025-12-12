@@ -24,6 +24,7 @@
   <li><a href="#scrapbox-client">scrapbox-client</a>
   <ul>
     <li><a href="#install">Install</a></li>
+    <li><a href="#cli">CLI</a></li>
     <li><a href="#library">Library</a></li>
     <li><a href="#license">License</a></li>
   </ul></li>
@@ -281,6 +282,32 @@ scrapbox    </h1>
 <pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>scrapbox-client
 </code></pre>
 </div>
+
+<h2 id="cli">CLI</h2>
+
+<pre><code>$ sbc
+usage: sbc [-h] [--version] [--connect-sid CONNECT_SID | --connect-sid-file CONNECT_SID_FILE] {pages,bulk-pages,page,text,icon,file} ...
+
+Scrapbox API client CLI
+
+positional arguments:
+  {pages,bulk-pages,page,text,icon,file}
+                        Available commands
+    pages               Get page list from a project
+    bulk-pages          Get all pages from a project
+    page                Get detailed information about a page
+    text                Get text content of a page
+    icon                Get icon URL for a page
+    file                Download a file from Scrapbox
+
+options:
+  -h, --help            show this help message and exit
+  --version             Show program's version number and exit
+  --connect-sid CONNECT_SID
+                        Scrapbox authentication cookie (connect.sid)
+  --connect-sid-file CONNECT_SID_FILE
+                        Path to file containing connect.sid (default: ~/.config/scrapbox-client/connect.sid)
+</code></pre>
 
 <h2 id="library">Library</h2>
 
