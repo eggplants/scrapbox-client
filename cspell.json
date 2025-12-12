@@ -25,6 +25,7 @@
     "pymarkdown",
     "pymarkdownlnt",
     "pypi",
+    "pyproject",
     "pytest",
     "scrapbox",
     "sdist",

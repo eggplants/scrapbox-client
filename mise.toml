@@ -30,10 +30,14 @@ run = "uv build"
 description = "Generate documentation"
 run = "uv run pdoc scrapbox -o ./docs --docformat google"
 
+[tasks.pyproject-fmt]
+description = "Run pyproject-fmt"
+run = "uv run pyproject-fmt ./pyproject.toml"
+
 [tasks.pre-commit]
 description = "Run checks on pre-commit"
-depends = ["ruff", "ty", "pymarkdown"]
+depends = ["ruff", "ty", "pymarkdown", "pyproject-fmt"]
 
 [tasks.ci]
 description = "Run CI checks"
-depends = ["ruff", "ty", "pytest-cov", "pymarkdown"]
+depends = ["pre-commit", "pytest-cov"]
