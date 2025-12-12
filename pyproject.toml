@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling", "uv-dynamic-versioning"]
+build-backend = "hatchling.build"
+
+[project]
+name = "scrapbox-client"
+dynamic = ["version"]
+description = "Scrapbox (Helpfeel Cosence) API Client"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "httpx>=0.28.1",
+    "pydantic>=2.12.5",
+]
+keywords = []
+license-files = ["LICENSE"]
+authors = [ { name = "eggplants", email = "w10776e8w@yahoo.co.jp" } ]
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.14",
+  "Typing :: Typed",
+]
+urls.Repository = "https://github.com/eggplants/scrapbox-client"
+scripts.sb2notion = "scrapbox.main:main"
+
+[dependency-groups]
+dev = [
+    "pymarkdownlnt>=0.9.33",
+    "pytest>=9.0.2",
+]
+docs = [
+    "pdoc>=16.0.0",
+]
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.hatch.build.targets.sdist]
+include = [ "scrapbox" ]
+
+[tool.hatch.build.targets.wheel]
+include = [ "scrapbox" ]
+
+[tool.uv]
+preview = true
+default-groups = [
+  "dev",
+  "docs",
+]
+# FIXME: https://github.com/astral-sh/uv/issues/17103
+# exclude-newer = "P7D"
+
+[tool.ruff]
+line-length = 120
+format.indent-style = "space"
+format.quote-style = "double"
+lint.select = ["ALL"]
+lint.ignore = ["COM812"]
+lint.per-file-ignores."main.py" = [
+  "T201", # `print` found
+]
+lint.per-file-ignores."tests/*test_*.py" = [
+  "S101", # Use of assert detected
+]
+lint.pydocstyle.convention = "google"

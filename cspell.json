@@ -1,0 +1,44 @@
+{
+  "language": "en_US",
+  "words": [
+    "Bxxxxxxxxx",
+    "Bxxxxxxxxxxx",
+    "capfd",
+    "charliermarsh",
+    "Cosense",
+    "docformat",
+    "gruntfuggly",
+    "gyazo",
+    "Helpfeel",
+    "helpfeels",
+    "httpx",
+    "hverlin",
+    "junitxml",
+    "MishaKav",
+    "oembed",
+    "pdoc",
+    "peaceiris",
+    "pydantic",
+    "pymarkdown",
+    "pymarkdownlnt",
+    "pypi",
+    "pytest",
+    "scrapbox",
+    "tombi"
+  ],
+  "dictionaries": [
+    "companies",
+    "markdown",
+    "misc",
+    "softwareTerms",
+    "useCompounds"
+  ],
+  "ignorePaths": [
+    ".gitignore",
+    ".cspell.json"
+  ],
+  "features": {
+    "weighted-suggestions": true
+  },
+  "useGitignore": true
+}
