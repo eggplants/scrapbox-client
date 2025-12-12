@@ -18,6 +18,33 @@
 pip install scrapbox-client
 ```
 
+## CLI
+
+```shellsession
+$ sbc
+usage: sbc [-h] [--version] [--connect-sid CONNECT_SID | --connect-sid-file CONNECT_SID_FILE] {pages,bulk-pages,page,text,icon,file} ...
+
+Scrapbox API client CLI
+
+positional arguments:
+  {pages,bulk-pages,page,text,icon,file}
+                        Available commands
+    pages               Get page list from a project
+    bulk-pages          Get all pages from a project
+    page                Get detailed information about a page
+    text                Get text content of a page
+    icon                Get icon URL for a page
+    file                Download a file from Scrapbox
+
+options:
+  -h, --help            show this help message and exit
+  --version             Show program's version number and exit
+  --connect-sid CONNECT_SID
+                        Scrapbox authentication cookie (connect.sid)
+  --connect-sid-file CONNECT_SID_FILE
+                        Path to file containing connect.sid (default: ~/.config/scrapbox-client/connect.sid)
+```
+
 ## Library
 
 ### Overview

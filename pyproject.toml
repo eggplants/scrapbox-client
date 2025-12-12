@@ -21,7 +21,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 urls.Repository = "https://github.com/eggplants/scrapbox-client"
-scripts.sb2notion = "scrapbox.main:main"
+scripts.sbc = "scrapbox.main:main"
 
 [dependency-groups]
 dev = [

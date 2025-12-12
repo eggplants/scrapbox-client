@@ -26,7 +26,7 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"scrapbox-client {__version__}",
+        version=f"sbc {__version__}",
         help="Show program's version number and exit",
     )
 
