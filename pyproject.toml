@@ -59,6 +59,7 @@ format.quote-style = "double"
 lint.select = [ "ALL" ]
 lint.ignore = [ "COM812" ]
 lint.per-file-ignores."main.py" = [
+  "S101", # Use of assert detected
   "T201", # `print` found
 ]
 lint.per-file-ignores."tests/*test_*.py" = [

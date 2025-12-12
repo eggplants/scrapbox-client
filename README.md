@@ -45,10 +45,10 @@ options:
                         Path to file containing connect.sid (default: ~/.config/sbc/connect.sid)
 
 examples:
-  sbc pages my-project --limit 10
-  sbc all-pages my-project --batch-size 500
-  sbc page my-project "Page Title"
-  sbc text my-project "Page Title" --output page.txt
+  sbc pages my-project --limit 10 --skip 10 --json
+  sbc all-pages my-project --batch-size 500 --json
+  sbc page my-project "Page Title" --json
+  sbc text my-project "Page Title"
   sbc icon my-project "Page Title"
   sbc file 60190edf1176d9001c13f8e8.png --output image.png
 

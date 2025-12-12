@@ -57,6 +57,28 @@ class TestCLI:
         assert "Skip: 5, Limit: 2" in captured.out
         assert not captured.err
 
+    def test_pages_command_json(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test pages command with JSON output."""
+        exit_code = main(test_args=["pages", self.PROJECT_NAME, "--limit", "3", "--json"])
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        # JSON output should contain these fields
+        assert '"projectName"' in captured.out
+        assert '"pages"' in captured.out
+        assert '"count"' in captured.out
+        # Should not have the formatted text output
+        assert "Project:" not in captured.out
+        assert not captured.err
+
+    def test_pages_command_json_short_option(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test pages command with -j short option."""
+        exit_code = main(test_args=["pages", self.PROJECT_NAME, "--limit", "3", "-j"])
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert '"projectName"' in captured.out
+        assert '"pages"' in captured.out
+        assert not captured.err
+
     def test_all_pages_command(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Test all-pages command."""
         # Use small batch size for testing
@@ -66,6 +88,20 @@ class TestCLI:
         assert f"Project: {self.PROJECT_NAME}" in captured.out
         assert "Total pages:" in captured.out
         # Check stderr for progress messages
+        assert "Fetching all pages..." in captured.err or "Fetched" in captured.err
+
+    def test_all_pages_command_json(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test all-pages command with JSON output."""
+        exit_code = main(test_args=["all-pages", self.PROJECT_NAME, "--batch-size", "10", "--json"])
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        # JSON output should contain these fields
+        assert '"projectName"' in captured.out
+        assert '"pages"' in captured.out
+        assert '"count"' in captured.out
+        # Should not have the formatted text output
+        assert "Project:" not in captured.out
+        # Progress messages still in stderr
         assert "Fetching all pages..." in captured.err or "Fetched" in captured.err
 
     def test_page_command(self, capfd: pytest.CaptureFixture[str]) -> None:
@@ -79,6 +115,20 @@ class TestCLI:
         assert "Views:" in captured.out
         assert not captured.err
 
+    def test_page_command_json(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test page command with JSON output."""
+        exit_code = main(test_args=["page", self.PROJECT_NAME, self.PAGE_TITLE, "--json"])
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        # JSON output should contain these fields
+        assert '"title"' in captured.out
+        assert '"lines"' in captured.out
+        assert '"linesCount"' in captured.out
+        assert '"charsCount"' in captured.out
+        # Should not have the formatted text output
+        assert "Title:" not in captured.out
+        assert not captured.err
+
     def test_text_command(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Test text command to stdout."""
         exit_code = main(test_args=["text", self.PROJECT_NAME, self.PAGE_TITLE])
@@ -87,20 +137,6 @@ class TestCLI:
         assert self.PAGE_TITLE in captured.out
         assert len(captured.out) > 0
         assert not captured.err
-
-    def test_text_command_with_output_file(self, capfd: pytest.CaptureFixture[str], tmp_path: Path) -> None:
-        """Test text command with output file."""
-        output_file = tmp_path / "output.txt"
-        exit_code = main(test_args=["text", self.PROJECT_NAME, self.PAGE_TITLE, "--output", str(output_file)])
-        assert exit_code == 0
-        captured = capfd.readouterr()
-        assert f"Saved to {output_file}" in captured.err
-        assert not captured.out
-
-        # Verify file was created and has content
-        assert output_file.exists()
-        content = output_file.read_text(encoding="utf-8")
-        assert self.PAGE_TITLE in content
 
     def test_invalid_project(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Test error handling for invalid project."""
@@ -138,6 +174,7 @@ class TestCLI:
         assert "pages" in captured.out
         assert "--skip" in captured.out
         assert "--limit" in captured.out
+        assert "--json" in captured.out or "-j" in captured.out
         assert "Project name" in captured.out
 
     def test_page_help(self, capfd: pytest.CaptureFixture[str]) -> None:
@@ -147,6 +184,7 @@ class TestCLI:
         assert e.value.code == 0
         captured = capfd.readouterr()
         assert "page" in captured.out
+        assert "--json" in captured.out or "-j" in captured.out
         assert "Project name" in captured.out
         assert "Page title" in captured.out
 
@@ -157,7 +195,6 @@ class TestCLI:
         assert e.value.code == 0
         captured = capfd.readouterr()
         assert "text" in captured.out
-        assert "--output" in captured.out
         assert "Project name" in captured.out
 
     def test_all_pages_help(self, capfd: pytest.CaptureFixture[str]) -> None:
@@ -168,6 +205,7 @@ class TestCLI:
         captured = capfd.readouterr()
         assert "all-pages" in captured.out
         assert "--batch-size" in captured.out
+        assert "--json" in captured.out or "-j" in captured.out
         assert "Project name" in captured.out
 
     def test_icon_command(self, capfd: pytest.CaptureFixture[str]) -> None:
@@ -220,23 +258,6 @@ class TestCLI:
         assert "file" in captured.out
         assert "--output" in captured.out
         assert "File ID" in captured.out
-
-    def test_text_output_to_directory_error(self, capfd: pytest.CaptureFixture[str], tmp_path: Path) -> None:
-        """Test text command with directory as output path."""
-        with pytest.raises(SystemExit) as e:
-            main(test_args=["text", self.PROJECT_NAME, self.PAGE_TITLE, "--output", str(tmp_path)])
-        assert e.value.code == ARGPARSE_ERROR_CODE
-        captured = capfd.readouterr()
-        assert "is a directory" in captured.err
-
-    def test_text_output_to_nonexistent_parent_error(self, capfd: pytest.CaptureFixture[str], tmp_path: Path) -> None:
-        """Test text command with non-existent parent directory."""
-        invalid_path = tmp_path / "nonexistent" / "output.txt"
-        with pytest.raises(SystemExit) as e:
-            main(test_args=["text", self.PROJECT_NAME, self.PAGE_TITLE, "--output", str(invalid_path)])
-        assert e.value.code == ARGPARSE_ERROR_CODE
-        captured = capfd.readouterr()
-        assert "does not exist" in captured.err
 
     def test_file_output_to_directory_error(self, capfd: pytest.CaptureFixture[str], tmp_path: Path) -> None:
         """Test file command with directory as output path."""

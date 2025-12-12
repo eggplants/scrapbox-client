@@ -8,6 +8,23 @@ from textwrap import dedent
 
 from . import __version__
 from .client import ScrapboxClient
+from .models import PageListResponse
+
+
+class ScrapboxCliArgs(argparse.Namespace):
+    """Dataclass for CLI arguments."""
+
+    command: str
+    project: str | None = None
+    title: str | None = None
+    file_id: str | None = None
+    skip: int = 0
+    limit: int = 100
+    batch_size: int = 1000
+    json: bool = False
+    output: str | None = None
+    connect_sid: str | None = None
+    connect_sid_file: str | None = None
 
 
 def check_output_path(path_str: str) -> str:
@@ -44,10 +61,10 @@ def create_parser() -> argparse.ArgumentParser:
         epilog=dedent(
             """
             examples:
-              sbc pages my-project --limit 10
-              sbc all-pages my-project --batch-size 500
-              sbc page my-project "Page Title"
-              sbc text my-project "Page Title" --output page.txt
+              sbc pages my-project --limit 10 --skip 10 --json
+              sbc all-pages my-project --batch-size 500 --json
+              sbc page my-project "Page Title" --json
+              sbc text my-project "Page Title"
               sbc icon my-project "Page Title"
               sbc file 60190edf1176d9001c13f8e8.png --output image.png
 
@@ -87,6 +104,7 @@ def create_parser() -> argparse.ArgumentParser:
     pages_parser.add_argument("project", help="Project name")
     pages_parser.add_argument("--skip", type=int, default=0, help="Number of pages to skip")
     pages_parser.add_argument("--limit", type=int, default=100, help="Number of pages to retrieve")
+    pages_parser.add_argument("--json", "-j", action="store_true", help="Output in JSON format")
     pages_parser.set_defaults(handler=cmd_pages)
 
     # all-pages command
@@ -95,19 +113,20 @@ def create_parser() -> argparse.ArgumentParser:
     all_pages_parser.add_argument(
         "--batch-size", type=int, default=1000, help="Number of pages to fetch per batch (default: 1000)"
     )
+    all_pages_parser.add_argument("--json", "-j", action="store_true", help="Output in JSON format")
     all_pages_parser.set_defaults(handler=cmd_all_pages)
 
     # page command
     page_parser = subparsers.add_parser("page", help="Get detailed information about a page")
     page_parser.add_argument("project", help="Project name")
     page_parser.add_argument("title", help="Page title")
+    page_parser.add_argument("--json", "-j", action="store_true", help="Output in JSON format")
     page_parser.set_defaults(handler=cmd_page)
 
     # text command
     text_parser = subparsers.add_parser("text", help="Get text content of a page")
     text_parser.add_argument("project", help="Project name")
     text_parser.add_argument("title", help="Page title")
-    text_parser.add_argument("--output", "-o", type=check_output_path, help="Output file path (default: stdout)")
     text_parser.set_defaults(handler=cmd_text)
 
     # icon command
@@ -125,7 +144,7 @@ def create_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def cmd_pages(client: ScrapboxClient, args: argparse.Namespace) -> int:
+def cmd_pages(client: ScrapboxClient, args: ScrapboxCliArgs) -> int:
     """Execute pages command.
 
     Args:
@@ -136,26 +155,30 @@ def cmd_pages(client: ScrapboxClient, args: argparse.Namespace) -> int:
         Exit code.
     """
     try:
+        assert args.project is not None
         pages = client.get_pages(args.project, skip=args.skip, limit=args.limit)
-        output = dedent(
-            f"""
-            ===
-            Project: {pages.project_name}
-            Total pages: {pages.count}
-            Skip: {pages.skip}, Limit: {pages.limit}
-            ===
-            """
-        )
-        for page in pages.pages:
-            output += f"- {page.title} (views: {page.views}, updated: {page.updated})\n"
-        print(output.rstrip())
+        if args.json:
+            print(pages.model_dump_json(indent=2, by_alias=True))
+        else:
+            output = dedent(
+                f"""
+                ===
+                Project: {pages.project_name}
+                Total pages: {pages.count}
+                Skip: {pages.skip}, Limit: {pages.limit}
+                ===
+                """
+            )
+            for page in pages.pages:
+                output += f"- {page.title} (views: {page.views}, updated: {page.updated})\n"
+            print(output.rstrip())
     except Exception as e:  # noqa: BLE001
         print(f"Error: {e}", file=sys.stderr)
         return 1
     return 0
 
 
-def cmd_all_pages(client: ScrapboxClient, args: argparse.Namespace) -> int:
+def cmd_all_pages(client: ScrapboxClient, args: ScrapboxCliArgs) -> int:
     """Execute all-pages command.
 
     Args:
@@ -166,6 +189,7 @@ def cmd_all_pages(client: ScrapboxClient, args: argparse.Namespace) -> int:
         Exit code.
     """
     try:
+        assert args.project is not None
         all_pages = []
         skip = 0
         batch_size = args.batch_size
@@ -186,24 +210,36 @@ def cmd_all_pages(client: ScrapboxClient, args: argparse.Namespace) -> int:
             if skip >= pages.count:
                 break
 
-        output = dedent(
-            f"""
-            ===
-            Project: {pages.project_name}
-            Total pages: {len(all_pages)}
-            ===
-            """
-        )
-        for page in all_pages:
-            output += f"- {page.title} (views: {page.views}, updated: {page.updated})\n"
-        print(output.rstrip())
+        if args.json:
+            result = PageListResponse.model_validate(
+                {
+                    "project_name": pages.project_name,
+                    "skip": 0,
+                    "limit": len(all_pages),
+                    "count": len(all_pages),
+                    "pages": all_pages,
+                }
+            )
+            print(result.model_dump_json(indent=2, by_alias=True))
+        else:
+            output = dedent(
+                f"""
+                ===
+                Project: {pages.project_name}
+                Total pages: {len(all_pages)}
+                ===
+                """
+            )
+            for page in all_pages:
+                output += f"- {page.title} (views: {page.views}, updated: {page.updated})\n"
+            print(output.rstrip())
     except Exception as e:  # noqa: BLE001
         print(f"Error: {e}", file=sys.stderr)
         return 1
     return 0
 
 
-def cmd_page(client: ScrapboxClient, args: argparse.Namespace) -> int:
+def cmd_page(client: ScrapboxClient, args: ScrapboxCliArgs) -> int:
     """Execute page command.
 
     Args:
@@ -214,32 +250,37 @@ def cmd_page(client: ScrapboxClient, args: argparse.Namespace) -> int:
         Exit code.
     """
     try:
+        assert args.project is not None
+        assert args.title is not None
         page = client.get_page(args.project, args.title)
-        output = dedent(
-            f"""
-            ===
-            Title: {page.title}
-            ID: {page.id}
-            Lines: {page.lines_count}
-            Characters: {page.chars_count}
-            Views: {page.views}
-            Created: {page.created}
-            Updated: {page.updated}
-            ===
+        if args.json:
+            print(page.model_dump_json(indent=2, by_alias=True))
+        else:
+            output = dedent(
+                f"""
+                ===
+                Title: {page.title}
+                ID: {page.id}
+                Lines: {page.lines_count}
+                Characters: {page.chars_count}
+                Views: {page.views}
+                Created: {page.created}
+                Updated: {page.updated}
+                ===
 
-            Content:
-            """
-        )
-        for line in page.lines:
-            output += f"  {line.text}\n"
-        print(output.rstrip())
+                Content:
+                """
+            )
+            for line in page.lines:
+                output += f"  {line.text}\n"
+            print(output.rstrip())
     except Exception as e:  # noqa: BLE001
         print(f"Error: {e}", file=sys.stderr)
         return 1
     return 0
 
 
-def cmd_text(client: ScrapboxClient, args: argparse.Namespace) -> int:
+def cmd_text(client: ScrapboxClient, args: ScrapboxCliArgs) -> int:
     """Execute text command.
 
     Args:
@@ -250,19 +291,16 @@ def cmd_text(client: ScrapboxClient, args: argparse.Namespace) -> int:
         Exit code.
     """
     try:
-        text = client.get_page_text(args.project, args.title)
-        if args.output:
-            Path(args.output).write_text(text, encoding="utf-8")
-            print(f"Saved to {args.output}", file=sys.stderr)
-        else:
-            print(text)
+        assert args.project is not None
+        assert args.title is not None
+        print(client.get_page_text(args.project, args.title))
     except Exception as e:  # noqa: BLE001
         print(f"Error: {e}", file=sys.stderr)
         return 1
     return 0
 
 
-def cmd_icon(client: ScrapboxClient, args: argparse.Namespace) -> int:
+def cmd_icon(client: ScrapboxClient, args: ScrapboxCliArgs) -> int:
     """Execute icon command.
 
     Args:
@@ -273,6 +311,8 @@ def cmd_icon(client: ScrapboxClient, args: argparse.Namespace) -> int:
         Exit code.
     """
     try:
+        assert args.project is not None
+        assert args.title is not None
         print(client.get_page_icon_url(args.project, args.title))
     except Exception as e:  # noqa: BLE001
         print(f"Error: {e}", file=sys.stderr)
@@ -280,7 +320,7 @@ def cmd_icon(client: ScrapboxClient, args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_file(client: ScrapboxClient, args: argparse.Namespace) -> int:
+def cmd_file(client: ScrapboxClient, args: ScrapboxCliArgs) -> int:
     """Execute file command.
 
     Args:
@@ -291,6 +331,8 @@ def cmd_file(client: ScrapboxClient, args: argparse.Namespace) -> int:
         Exit code.
     """
     try:
+        assert args.output is not None
+        assert args.file_id is not None
         Path(args.output).write_bytes(client.get_file(args.file_id))
         print(f"Downloaded to {args.output}", file=sys.stderr)
     except Exception as e:  # noqa: BLE001
@@ -299,7 +341,7 @@ def cmd_file(client: ScrapboxClient, args: argparse.Namespace) -> int:
     return 0
 
 
-def get_connect_sid(args: argparse.Namespace) -> str | None:
+def get_connect_sid(args: ScrapboxCliArgs) -> str | None:
     """Get connect.sid from arguments or default location.
 
     Args:
@@ -333,7 +375,11 @@ def main(*, test_args: list[str] | None = None) -> int:
         Exit code.
     """
     parser = create_parser()
-    args = parser.parse_args(test_args) if test_args is not None else parser.parse_args()
+    args = (
+        parser.parse_args(test_args, namespace=ScrapboxCliArgs())
+        if test_args is not None
+        else parser.parse_args(namespace=ScrapboxCliArgs())
+    )
 
     if not hasattr(args, "handler"):
         parser.print_help()
