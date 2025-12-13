@@ -22,8 +22,9 @@
         "streetsidesoftware.code-spell-checker",
         "redhat.vscode-yaml",
         "charliermarsh.ruff",
-        "astral-sh.ty",
-        "tombi-toml.tombi"
+        "astral-sh.ty@prerelease",
+        "tombi-toml.tombi",
+        "-ms-python.vscode-pylance"
       ],
       "settings": {
         // Python
