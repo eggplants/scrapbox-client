@@ -35,6 +35,12 @@
             <h2>API Documentation</h2>
                 <ul class="memberlist">
             <li>
+                    <a class="class" href="#GyazoOEmbedResponse">GyazoOEmbedResponse</a>
+                            <ul class="memberlist">
+                </ul>
+
+            </li>
+            <li>
                     <a class="class" href="#Line">Line</a>
                             <ul class="memberlist">
                         <li>
@@ -441,7 +447,7 @@ priority of `connect.sid` source:
 </span><span id="L-3"><a href="#L-3"><span class="linenos"> 3</span></a><span class="kn">import</span><span class="w"> </span><span class="nn">importlib.metadata</span>
 </span><span id="L-4"><a href="#L-4"><span class="linenos"> 4</span></a>
 </span><span id="L-5"><a href="#L-5"><span class="linenos"> 5</span></a><span class="kn">from</span><span class="w"> </span><span class="nn">.client</span><span class="w"> </span><span class="kn">import</span> <span class="n">ScrapboxClient</span>
-</span><span id="L-6"><a href="#L-6"><span class="linenos"> 6</span></a><span class="kn">from</span><span class="w"> </span><span class="nn">.models</span><span class="w"> </span><span class="kn">import</span> <span class="n">Line</span><span class="p">,</span> <span class="n">PageDetail</span><span class="p">,</span> <span class="n">PageListItem</span><span class="p">,</span> <span class="n">PageListResponse</span><span class="p">,</span> <span class="n">User</span>
+</span><span id="L-6"><a href="#L-6"><span class="linenos"> 6</span></a><span class="kn">from</span><span class="w"> </span><span class="nn">.models</span><span class="w"> </span><span class="kn">import</span> <span class="n">GyazoOEmbedResponse</span><span class="p">,</span> <span class="n">Line</span><span class="p">,</span> <span class="n">PageDetail</span><span class="p">,</span> <span class="n">PageListItem</span><span class="p">,</span> <span class="n">PageListResponse</span><span class="p">,</span> <span class="n">User</span>
 </span><span id="L-7"><a href="#L-7"><span class="linenos"> 7</span></a>
 </span><span id="L-8"><a href="#L-8"><span class="linenos"> 8</span></a><span class="k">try</span><span class="p">:</span>
 </span><span id="L-9"><a href="#L-9"><span class="linenos"> 9</span></a>    <span class="n">__version__</span> <span class="o">=</span> <span class="n">importlib</span><span class="o">.</span><span class="n">metadata</span><span class="o">.</span><span class="n">version</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
@@ -449,17 +455,46 @@ priority of `connect.sid` source:
 </span><span id="L-11"><a href="#L-11"><span class="linenos">11</span></a>    <span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;0.0.0&quot;</span>
 </span><span id="L-12"><a href="#L-12"><span class="linenos">12</span></a>
 </span><span id="L-13"><a href="#L-13"><span class="linenos">13</span></a><span class="n">__all__</span> <span class="o">=</span> <span class="p">(</span>
-</span><span id="L-14"><a href="#L-14"><span class="linenos">14</span></a>    <span class="s2">&quot;Line&quot;</span><span class="p">,</span>
-</span><span id="L-15"><a href="#L-15"><span class="linenos">15</span></a>    <span class="s2">&quot;PageDetail&quot;</span><span class="p">,</span>
-</span><span id="L-16"><a href="#L-16"><span class="linenos">16</span></a>    <span class="s2">&quot;PageListItem&quot;</span><span class="p">,</span>
-</span><span id="L-17"><a href="#L-17"><span class="linenos">17</span></a>    <span class="s2">&quot;PageListResponse&quot;</span><span class="p">,</span>
-</span><span id="L-18"><a href="#L-18"><span class="linenos">18</span></a>    <span class="s2">&quot;ScrapboxClient&quot;</span><span class="p">,</span>
-</span><span id="L-19"><a href="#L-19"><span class="linenos">19</span></a>    <span class="s2">&quot;User&quot;</span><span class="p">,</span>
-</span><span id="L-20"><a href="#L-20"><span class="linenos">20</span></a><span class="p">)</span>
+</span><span id="L-14"><a href="#L-14"><span class="linenos">14</span></a>    <span class="s2">&quot;GyazoOEmbedResponse&quot;</span><span class="p">,</span>
+</span><span id="L-15"><a href="#L-15"><span class="linenos">15</span></a>    <span class="s2">&quot;Line&quot;</span><span class="p">,</span>
+</span><span id="L-16"><a href="#L-16"><span class="linenos">16</span></a>    <span class="s2">&quot;PageDetail&quot;</span><span class="p">,</span>
+</span><span id="L-17"><a href="#L-17"><span class="linenos">17</span></a>    <span class="s2">&quot;PageListItem&quot;</span><span class="p">,</span>
+</span><span id="L-18"><a href="#L-18"><span class="linenos">18</span></a>    <span class="s2">&quot;PageListResponse&quot;</span><span class="p">,</span>
+</span><span id="L-19"><a href="#L-19"><span class="linenos">19</span></a>    <span class="s2">&quot;ScrapboxClient&quot;</span><span class="p">,</span>
+</span><span id="L-20"><a href="#L-20"><span class="linenos">20</span></a>    <span class="s2">&quot;User&quot;</span><span class="p">,</span>
+</span><span id="L-21"><a href="#L-21"><span class="linenos">21</span></a><span class="p">)</span>
 </span></pre></div>
 
 
             </section>
+                <section id="GyazoOEmbedResponse">
+                            <input id="GyazoOEmbedResponse-view-source" class="view-source-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
+<div class="attr class">
+            
+    <span class="def">class</span>
+    <span class="name">GyazoOEmbedResponse</span><wbr>(<span class="base">pydantic.main.BaseModel</span>, <span class="base">typing.Generic[~RootModelRootType]</span>):
+
+                <label class="view-source-button" for="GyazoOEmbedResponse-view-source"><span>View Source</span></label>
+
+    </div>
+    <a class="headerlink" href="#GyazoOEmbedResponse"></a>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="GyazoOEmbedResponse-111"><a href="#GyazoOEmbedResponse-111"><span class="linenos">111</span></a><span class="k">class</span><span class="w"> </span><span class="nc">GyazoOEmbedResponse</span><span class="p">(</span><span class="n">RootModel</span><span class="p">[</span><span class="n">GyazoOEmbedResponsePhoto</span><span class="p">]):</span>
+</span><span id="GyazoOEmbedResponse-112"><a href="#GyazoOEmbedResponse-112"><span class="linenos">112</span></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Response from the Gyazo oEmbed API.</span>
+</span><span id="GyazoOEmbedResponse-113"><a href="#GyazoOEmbedResponse-113"><span class="linenos">113</span></a>
+</span><span id="GyazoOEmbedResponse-114"><a href="#GyazoOEmbedResponse-114"><span class="linenos">114</span></a><span class="sd">    See: https://gyazo.com/api/docs/image#oembed</span>
+</span><span id="GyazoOEmbedResponse-115"><a href="#GyazoOEmbedResponse-115"><span class="linenos">115</span></a><span class="sd">    &quot;&quot;&quot;</span>
+</span><span id="GyazoOEmbedResponse-116"><a href="#GyazoOEmbedResponse-116"><span class="linenos">116</span></a>
+</span><span id="GyazoOEmbedResponse-117"><a href="#GyazoOEmbedResponse-117"><span class="linenos">117</span></a>    <span class="n">model_config</span> <span class="o">=</span> <span class="n">ConfigDict</span><span class="p">(</span><span class="n">alias_generator</span><span class="o">=</span><span class="n">to_camel</span><span class="p">,</span> <span class="n">from_attributes</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">populate_by_name</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</span></pre></div>
+
+
+            <div class="docstring"><p>Response from the Gyazo oEmbed API.</p>
+
+<p>See: <a href="https://gyazo.com/api/docs/image#oembed">https://gyazo.com/api/docs/image#oembed</a></p>
+</div>
+
+
+                </section>
                 <section id="Line">
                             <input id="Line-view-source" class="view-source-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
 <div class="attr class">
