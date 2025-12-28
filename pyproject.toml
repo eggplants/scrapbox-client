@@ -57,8 +57,7 @@ default-groups = [
   "dev",
   "docs",
 ]
-# FIXME: https://github.com/astral-sh/uv/issues/17103
-# exclude-newer = "P7D"
+exclude-newer = "P7D"
 
 [tool.ruff]
 line-length = 120
