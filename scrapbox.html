@@ -609,11 +609,11 @@ priority of `connect.sid` source:
 </span><span id="PageDetail-78"><a href="#PageDetail-78"><span class="linenos">78</span></a>    <span class="n">pin</span><span class="p">:</span> <span class="nb">int</span>
 </span><span id="PageDetail-79"><a href="#PageDetail-79"><span class="linenos">79</span></a>    <span class="n">views</span><span class="p">:</span> <span class="nb">int</span>
 </span><span id="PageDetail-80"><a href="#PageDetail-80"><span class="linenos">80</span></a>    <span class="n">linked</span><span class="p">:</span> <span class="nb">int</span>
-</span><span id="PageDetail-81"><a href="#PageDetail-81"><span class="linenos">81</span></a>    <span class="n">commit_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">alias</span><span class="o">=</span><span class="s2">&quot;commitId&quot;</span><span class="p">)</span>
+</span><span id="PageDetail-81"><a href="#PageDetail-81"><span class="linenos">81</span></a>    <span class="n">commit_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">alias</span><span class="o">=</span><span class="s2">&quot;commitId&quot;</span><span class="p">)</span>
 </span><span id="PageDetail-82"><a href="#PageDetail-82"><span class="linenos">82</span></a>    <span class="n">created</span><span class="p">:</span> <span class="nb">int</span>
 </span><span id="PageDetail-83"><a href="#PageDetail-83"><span class="linenos">83</span></a>    <span class="n">updated</span><span class="p">:</span> <span class="nb">int</span>
 </span><span id="PageDetail-84"><a href="#PageDetail-84"><span class="linenos">84</span></a>    <span class="n">accessed</span><span class="p">:</span> <span class="nb">int</span>
-</span><span id="PageDetail-85"><a href="#PageDetail-85"><span class="linenos">85</span></a>    <span class="n">snapshot_created</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">alias</span><span class="o">=</span><span class="s2">&quot;snapshotCreated&quot;</span><span class="p">)</span>
+</span><span id="PageDetail-85"><a href="#PageDetail-85"><span class="linenos">85</span></a>    <span class="n">snapshot_created</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">alias</span><span class="o">=</span><span class="s2">&quot;snapshotCreated&quot;</span><span class="p">)</span>
 </span><span id="PageDetail-86"><a href="#PageDetail-86"><span class="linenos">86</span></a>    <span class="n">page_rank</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">alias</span><span class="o">=</span><span class="s2">&quot;pageRank&quot;</span><span class="p">)</span>
 </span><span id="PageDetail-87"><a href="#PageDetail-87"><span class="linenos">87</span></a>    <span class="n">last_accessed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">alias</span><span class="o">=</span><span class="s2">&quot;lastAccessed&quot;</span><span class="p">)</span>
 </span><span id="PageDetail-88"><a href="#PageDetail-88"><span class="linenos">88</span></a>    <span class="n">lines_count</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">alias</span><span class="o">=</span><span class="s2">&quot;linesCount&quot;</span><span class="p">)</span>
@@ -738,8 +738,8 @@ priority of `connect.sid` source:
                             </div>
                             <div id="PageDetail.commit_id" class="classattr">
                                 <div class="attr variable">
-            <span class="name">commit_id</span><span class="annotation">: str</span>        =
-<span class="default_value">PydanticUndefined</span>
+            <span class="name">commit_id</span><span class="annotation">: str | None</span>        =
+<span class="default_value">None</span>
 
         
     </div>
@@ -786,8 +786,8 @@ priority of `connect.sid` source:
                             </div>
                             <div id="PageDetail.snapshot_created" class="classattr">
                                 <div class="attr variable">
-            <span class="name">snapshot_created</span><span class="annotation">: int</span>        =
-<span class="default_value">PydanticUndefined</span>
+            <span class="name">snapshot_created</span><span class="annotation">: int | None</span>        =
+<span class="default_value">None</span>
 
         
     </div>
