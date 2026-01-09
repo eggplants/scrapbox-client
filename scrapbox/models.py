@@ -77,11 +77,11 @@ class PageDetail(BaseModel):
     pin: int
     views: int
     linked: int
-    commit_id: str = Field(alias="commitId")
+    commit_id: str | None = Field(None, alias="commitId")
     created: int
     updated: int
     accessed: int
-    snapshot_created: int = Field(alias="snapshotCreated")
+    snapshot_created: int | None = Field(None, alias="snapshotCreated")
     page_rank: float = Field(alias="pageRank")
     last_accessed: int | None = Field(None, alias="lastAccessed")
     lines_count: int = Field(alias="linesCount")
