@@ -5,7 +5,7 @@ from urllib.parse import quote, urlparse
 
 import httpx
 
-from .models import GyazoOEmbedResponse, PageDetail, PageListResponse
+from .models import GyazoOEmbedResponse, GyazoOEmbedResponsePhoto, PageDetail, PageListResponse
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -139,15 +139,26 @@ class ScrapboxClient:
 
         parsed_url = urlparse(url)
         if parsed_url.hostname and "gyazo.com" in parsed_url.hostname:
-            oembed_url = f"{self.BASE_URL}/oembed-proxy/gyazo"
-            response = self.client.get(oembed_url, params={"url": url})
-            response.raise_for_status()
-            json = response.json()
-            if oembed_type := json.get("type") != "photo":
-                msg = f"Unsupported Gyazo oEmbed type: {oembed_type}"
-                raise ValueError(msg)
-            oembed_data = GyazoOEmbedResponse.model_validate(json)
-            url = oembed_data.root.url
+            # If URL already has a file extension (e.g., .mp4, .jpg), directly convert to i.gyazo.com
+            path = parsed_url.path.strip("/")
+            if "." in path.split("/")[-1]:  # Check if last path segment has extension
+                url = f"https://i.gyazo.com/{path}"
+            else:
+                # Use oEmbed API to get the actual file URL
+                oembed_url = f"{self.BASE_URL}/oembed-proxy/gyazo"
+                response = self.client.get(oembed_url, params={"url": url})
+                response.raise_for_status()
+                json = response.json()
+                if (oembed_type := json.get("type")) not in ("photo", "video"):
+                    msg = f"Unsupported Gyazo oEmbed type: {oembed_type}"
+                    raise ValueError(msg)
+                oembed_data = GyazoOEmbedResponse.model_validate(json)
+                if isinstance(oembed_data.root, GyazoOEmbedResponsePhoto):
+                    url = oembed_data.root.url
+                else:  # video
+                    # Extract Gyazo ID from the original URL and construct direct video URL
+                    gyazo_id = parsed_url.path.strip("/")
+                    url = f"https://i.gyazo.com/{gyazo_id}.mp4"
         response = self.client.get(url)
         response.raise_for_status()
 

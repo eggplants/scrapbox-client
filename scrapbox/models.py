@@ -107,7 +107,28 @@ class GyazoOEmbedResponsePhoto(BaseModel):
     title: str
 
 
-class GyazoOEmbedResponse(RootModel[GyazoOEmbedResponsePhoto]):
+class GyazoOEmbedResponseVideo(BaseModel):
+    """Video information in the Gyazo oEmbed response."""
+
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, populate_by_name=True)
+
+    type: Literal["video"]
+    version: Literal["1.0"]
+    provider_name: str
+    provider_url: str
+    html: str
+    thumbnail_url: str
+    thumbnail_width: int
+    thumbnail_height: int
+    has_audio_track: bool
+    video_length_ms: int
+    width: int
+    height: int
+    scale: float
+    title: str
+
+
+class GyazoOEmbedResponse(RootModel[GyazoOEmbedResponsePhoto | GyazoOEmbedResponseVideo]):
     """Response from the Gyazo oEmbed API.
 
     See: https://gyazo.com/api/docs/image#oembed
