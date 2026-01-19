@@ -240,14 +240,13 @@ class TestCLI:
             assert f"Downloaded to {output_file}" in captured.err
             assert output_file.exists()
 
-    def test_file_command_video_file(self, capfd: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    def test_file_command_video_file(self, tmp_path: Path) -> None:
         """Test file command with video file ID."""
         output_file = tmp_path / "downloaded_file.mp4"
         video_file_id = "https://gyazo.com/2b10554d1274b76f058a11b69c6a88dd"
         exit_code = main(test_args=["file", video_file_id, "--output", str(output_file)])
         assert exit_code == 0
         assert output_file.exists()
-
 
     def test_file_help(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Test file subcommand help."""

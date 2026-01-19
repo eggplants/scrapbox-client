@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel
+from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator
 from pydantic.alias_generators import to_camel
 
 
@@ -101,10 +101,30 @@ class GyazoOEmbedResponsePhoto(BaseModel):
     provider_name: str
     provider_url: str
     url: str
-    width: int
-    height: int
-    scale: float
+    width: int | None = None
+    height: int | None = None
+    scale: float | None = None
     title: str
+
+    @field_validator("width", "height", mode="before")
+    @classmethod
+    def empty_int_to_none(cls, v: str | int | None) -> int | None:
+        """Convert empty string to None for int fields."""
+        if v == "":
+            return None
+        if isinstance(v, str):
+            return int(v)
+        return v
+
+    @field_validator("scale", mode="before")
+    @classmethod
+    def empty_float_to_none(cls, v: str | float | None) -> float | None:
+        """Convert empty string to None for float fields."""
+        if v == "":
+            return None
+        if isinstance(v, str):
+            return float(v)
+        return v
 
 
 class GyazoOEmbedResponseVideo(BaseModel):
@@ -122,10 +142,30 @@ class GyazoOEmbedResponseVideo(BaseModel):
     thumbnail_height: int
     has_audio_track: bool
     video_length_ms: int
-    width: int
-    height: int
-    scale: float
+    width: int | None = None
+    height: int | None = None
+    scale: float | None = None
     title: str
+
+    @field_validator("width", "height", mode="before")
+    @classmethod
+    def empty_int_to_none(cls, v: str | int | None) -> int | None:
+        """Convert empty string to None for int fields."""
+        if v == "":
+            return None
+        if isinstance(v, str):
+            return int(v)
+        return v
+
+    @field_validator("scale", mode="before")
+    @classmethod
+    def empty_float_to_none(cls, v: str | float | None) -> float | None:
+        """Convert empty string to None for float fields."""
+        if v == "":
+            return None
+        if isinstance(v, str):
+            return float(v)
+        return v
 
 
 class GyazoOEmbedResponse(RootModel[GyazoOEmbedResponsePhoto | GyazoOEmbedResponseVideo]):
