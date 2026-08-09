@@ -740,12 +740,12 @@ scrapbox    </h1>
 <p><details></p>
 
 <pre><code>$ sbc
-usage: sbc [-h] [--version] [--connect-sid CONNECT_SID | --connect-sid-file CONNECT_SID_FILE] [--pat PAT | --pat-file PAT_FILE] [--service-account-key SERVICE_ACCOUNT_KEY | --service-account-key-file SERVICE_ACCOUNT_KEY_FILE] {pages,all-pages,page,text,icon,page-v2,links,search,vector-search,commits,members,projects,project,whoami,file,file-info,edit-preview,edit-submit,login} ...
+usage: sbc [-h] [--version] [--connect-sid CONNECT_SID | --connect-sid-file CONNECT_SID_FILE] [--pat PAT | --pat-file PAT_FILE] [--service-account-key SERVICE_ACCOUNT_KEY | --service-account-key-file SERVICE_ACCOUNT_KEY_FILE] {pages,all-pages,page,text,icon,page-v2,links,search,vector-search,commits,members,projects,project,whoami,file,file-info,edit-preview,edit-submit,login,info} ...
 
 Scrapbox API client CLI
 
 positional arguments:
-  {pages,all-pages,page,text,icon,page-v2,links,search,vector-search,commits,members,projects,project,whoami,file,file-info,edit-preview,edit-submit,login}
+  {pages,all-pages,page,text,icon,page-v2,links,search,vector-search,commits,members,projects,project,whoami,file,file-info,edit-preview,edit-submit,login,info}
                         Available commands
     pages               Get page list from a project
     all-pages           Get all pages from a project
@@ -767,6 +767,7 @@ positional arguments:
                         auth)
     edit-submit         Commit a previewed page edit (no cookie auth)
     login               Save a credential read from stdin
+    info                Show the environment and the state of each credential
 
 options:
   -h, --help            show this help message and exit
@@ -805,6 +806,8 @@ examples:
     | sbc edit-preview my-project --page-id &lt;pageId&gt;
   sbc edit-submit my-project &lt;previewId&gt;
   echo "pat_xxxxxxxx" | sbc login
+  sbc info
+  sbc info --project my-business-project --json
 
 `edit-preview` and `edit-submit` need a personal access token or a
 service account access key: the API rejects `connect.sid` for them
@@ -816,6 +819,12 @@ reaches only that one, so any other project answers 400 and `projects`,
 `sbc login` saves the credential read from stdin, choosing the file by its
 prefix: `s%` for ~/.config/sbc/connect.sid, `pat_` for ~/.config/sbc/pat,
 `cs_` for ~/.config/sbc/service-account-key
+
+`sbc info` reports the environment and, for each of the three credentials,
+where it was read from and whether the API still accepts it; a service
+account access key is only checked when `--project` names the project it
+belongs to, since every other project refuses a good key and a bogus one
+alike
 
 priority of `connect.sid` source:
   1. --connect-sid argument
@@ -879,6 +888,78 @@ $ sbc login
 Enter connect.sid, personal access token or service account access key:
 Saved to /home/you/.config/sbc/connect.sid
 </code></pre>
+
+<h3 id="checking-the-environment-and-the-credentials">Checking the environment and the credentials</h3>
+
+<p><code>sbc info</code> prints the version, the interpreter and the config directory, then
+reports each of the three credentials: where it was read from, its value masked
+down to the type prefix and its length, and whether the API still accepts it.
+Only a credential that is set costs a request, and <code>[in use]</code> marks the one the
+other commands would send.</p>
+
+<pre><code>$ sbc info
+sbc:        0.4.0
+python:     3.14.7 (CPython)
+executable: /usr/bin/python3
+platform:   Linux-7.0.0-27-generic-x86_64-with-glibc2.43
+httpx:      0.28.1
+config dir: /home/you/.config/sbc
+
+=== credentials ===
+- personal access token: valid [in use]
+    source: /home/you/.config/sbc/pat
+    value:  pat_... (68 chars)
+    detail: you (You)
+- service account access key: unknown
+    source: $SBC_SERVICE_ACCOUNT_KEY
+    value:  cs_a... (67 chars)
+    detail: pass --project &lt;name&gt; to check this key against the project it belongs to
+- connect.sid cookie: invalid
+    source: /home/you/.config/sbc/connect.sid
+    value:  s%3A... (92 chars)
+    detail: the API answered as a guest, so it did not accept this credential
+</code></pre>
+
+<table>
+<thead>
+<tr>
+  <th>Status</th>
+  <th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td><code>valid</code></td>
+  <td>the API accepted it</td>
+</tr>
+<tr>
+  <td><code>invalid</code></td>
+  <td>the API refused it, or answered as a guest</td>
+</tr>
+<tr>
+  <td><code>unknown</code></td>
+  <td>it could not be checked</td>
+</tr>
+<tr>
+  <td><code>not set</code></td>
+  <td>none of the sources held it</td>
+</tr>
+</tbody>
+</table>
+
+<p>A service account access key reaches one project only, and every other project
+refuses a good key and a bogus one alike, so it stays <code>unknown</code> until
+<code>--project</code> names the project it belongs to:</p>
+
+<pre><code>$ sbc info --project my-business-project
+...
+- service account access key: valid [in use]
+    source: /home/you/.config/sbc/service-account-key
+    value:  cs_a... (67 chars)
+    detail: accepted by project 'my-business-project'
+</code></pre>
+
+<p><code>sbc info --json</code> reports the same findings as JSON.</p>
 
 <h3 id="creating-and-editing-a-page-pat-service-account-access-key-only">Creating and editing a page (PAT / service account access key only)</h3>
 
@@ -3473,109 +3554,84 @@ account, so all four lists are needed to resolve an author id to a name.</p>
 
     </div>
     <a class="headerlink" href="#ScrapboxClient"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="ScrapboxClient-116"><a href="#ScrapboxClient-116"><span class="linenos">116</span></a><span class="k">class</span><span class="w"> </span><span class="nc">ScrapboxClient</span><span class="p">:</span>
-</span><span id="ScrapboxClient-117"><a href="#ScrapboxClient-117"><span class="linenos">117</span></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Scrapbox API client.</span>
-</span><span id="ScrapboxClient-118"><a href="#ScrapboxClient-118"><span class="linenos">118</span></a>
-</span><span id="ScrapboxClient-119"><a href="#ScrapboxClient-119"><span class="linenos">119</span></a><span class="sd">    This client provides methods to interact with the Scrapbox API,</span>
-</span><span id="ScrapboxClient-120"><a href="#ScrapboxClient-120"><span class="linenos">120</span></a><span class="sd">    including retrieving page lists, page details, page text, and files.</span>
-</span><span id="ScrapboxClient-121"><a href="#ScrapboxClient-121"><span class="linenos">121</span></a><span class="sd">    &quot;&quot;&quot;</span>
-</span><span id="ScrapboxClient-122"><a href="#ScrapboxClient-122"><span class="linenos">122</span></a>
-</span><span id="ScrapboxClient-123"><a href="#ScrapboxClient-123"><span class="linenos">123</span></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Base URL for the Scrapbox API.&quot;&quot;&quot;</span>
-</span><span id="ScrapboxClient-124"><a href="#ScrapboxClient-124"><span class="linenos">124</span></a>    <span class="n">BASE_URL</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">SCRAPBOX_ORIGIN</span><span class="si">}</span><span class="s2">/api&quot;</span>
-</span><span id="ScrapboxClient-125"><a href="#ScrapboxClient-125"><span class="linenos">125</span></a>
-</span><span id="ScrapboxClient-126"><a href="#ScrapboxClient-126"><span class="linenos">126</span></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
-</span><span id="ScrapboxClient-127"><a href="#ScrapboxClient-127"><span class="linenos">127</span></a>        <span class="bp">self</span><span class="p">,</span>
-</span><span id="ScrapboxClient-128"><a href="#ScrapboxClient-128"><span class="linenos">128</span></a>        <span class="n">connect_sid</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-</span><span id="ScrapboxClient-129"><a href="#ScrapboxClient-129"><span class="linenos">129</span></a>        <span class="n">pat</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-</span><span id="ScrapboxClient-130"><a href="#ScrapboxClient-130"><span class="linenos">130</span></a>        <span class="n">service_account_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-</span><span id="ScrapboxClient-131"><a href="#ScrapboxClient-131"><span class="linenos">131</span></a>        <span class="n">transport</span><span class="p">:</span> <span class="n">httpx</span><span class="o">.</span><span class="n">BaseTransport</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-</span><span id="ScrapboxClient-132"><a href="#ScrapboxClient-132"><span class="linenos">132</span></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="ScrapboxClient-133"><a href="#ScrapboxClient-133"><span class="linenos">133</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize the Scrapbox API client.</span>
-</span><span id="ScrapboxClient-134"><a href="#ScrapboxClient-134"><span class="linenos">134</span></a>
-</span><span id="ScrapboxClient-135"><a href="#ScrapboxClient-135"><span class="linenos">135</span></a><span class="sd">        Authentication is optional for public projects. Only one credential is ever</span>
-</span><span id="ScrapboxClient-136"><a href="#ScrapboxClient-136"><span class="linenos">136</span></a><span class="sd">        sent: given more than one, a personal access token wins over a service</span>
-</span><span id="ScrapboxClient-137"><a href="#ScrapboxClient-137"><span class="linenos">137</span></a><span class="sd">        account key, which in turn wins over a cookie.</span>
-</span><span id="ScrapboxClient-138"><a href="#ScrapboxClient-138"><span class="linenos">138</span></a>
-</span><span id="ScrapboxClient-139"><a href="#ScrapboxClient-139"><span class="linenos">139</span></a><span class="sd">        Args:</span>
-</span><span id="ScrapboxClient-140"><a href="#ScrapboxClient-140"><span class="linenos">140</span></a><span class="sd">            connect_sid: Scrapbox authentication cookie (connect.sid).</span>
-</span><span id="ScrapboxClient-141"><a href="#ScrapboxClient-141"><span class="linenos">141</span></a><span class="sd">            pat: Scrapbox personal access token, sent as the `x-personal-access-token`</span>
-</span><span id="ScrapboxClient-142"><a href="#ScrapboxClient-142"><span class="linenos">142</span></a><span class="sd">                header.</span>
-</span><span id="ScrapboxClient-143"><a href="#ScrapboxClient-143"><span class="linenos">143</span></a><span class="sd">            service_account_key: Access key of a service account, sent as the</span>
-</span><span id="ScrapboxClient-144"><a href="#ScrapboxClient-144"><span class="linenos">144</span></a><span class="sd">                `x-service-account-access-key` header. A service account is registered</span>
-</span><span id="ScrapboxClient-145"><a href="#ScrapboxClient-145"><span class="linenos">145</span></a><span class="sd">                on one project of a Business plan and can read and write only that</span>
-</span><span id="ScrapboxClient-146"><a href="#ScrapboxClient-146"><span class="linenos">146</span></a><span class="sd">                one: any other project, even a public one, answers 400. It stands for</span>
-</span><span id="ScrapboxClient-147"><a href="#ScrapboxClient-147"><span class="linenos">147</span></a><span class="sd">                no user, so `get_me` and `get_projects` are out of its reach, and</span>
-</span><span id="ScrapboxClient-148"><a href="#ScrapboxClient-148"><span class="linenos">148</span></a><span class="sd">                `get_project` refuses it as well.</span>
-</span><span id="ScrapboxClient-149"><a href="#ScrapboxClient-149"><span class="linenos">149</span></a><span class="sd">            transport: Transport used by the underlying HTTP client. Intended for</span>
-</span><span id="ScrapboxClient-150"><a href="#ScrapboxClient-150"><span class="linenos">150</span></a><span class="sd">                tests, which pass an `httpx.MockTransport` so that header handling</span>
-</span><span id="ScrapboxClient-151"><a href="#ScrapboxClient-151"><span class="linenos">151</span></a><span class="sd">                is still exercised.</span>
-</span><span id="ScrapboxClient-152"><a href="#ScrapboxClient-152"><span class="linenos">152</span></a><span class="sd">        &quot;&quot;&quot;</span>
-</span><span id="ScrapboxClient-153"><a href="#ScrapboxClient-153"><span class="linenos">153</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">pat</span> <span class="o">=</span> <span class="n">pat</span>
-</span><span id="ScrapboxClient-154"><a href="#ScrapboxClient-154"><span class="linenos">154</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">service_account_key</span> <span class="o">=</span> <span class="kc">None</span> <span class="k">if</span> <span class="n">pat</span> <span class="k">else</span> <span class="n">service_account_key</span>
-</span><span id="ScrapboxClient-155"><a href="#ScrapboxClient-155"><span class="linenos">155</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">connect_sid</span> <span class="o">=</span> <span class="kc">None</span> <span class="k">if</span> <span class="n">pat</span> <span class="ow">or</span> <span class="n">service_account_key</span> <span class="k">else</span> <span class="n">connect_sid</span>
-</span><span id="ScrapboxClient-156"><a href="#ScrapboxClient-156"><span class="linenos">156</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">client</span> <span class="o">=</span> <span class="n">httpx</span><span class="o">.</span><span class="n">Client</span><span class="p">(</span>
-</span><span id="ScrapboxClient-157"><a href="#ScrapboxClient-157"><span class="linenos">157</span></a>            <span class="n">cookies</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;connect.sid&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">connect_sid</span><span class="p">}</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">connect_sid</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
-</span><span id="ScrapboxClient-158"><a href="#ScrapboxClient-158"><span class="linenos">158</span></a>            <span class="n">follow_redirects</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-</span><span id="ScrapboxClient-159"><a href="#ScrapboxClient-159"><span class="linenos">159</span></a>            <span class="n">transport</span><span class="o">=</span><span class="n">transport</span><span class="p">,</span>
-</span><span id="ScrapboxClient-160"><a href="#ScrapboxClient-160"><span class="linenos">160</span></a>        <span class="p">)</span>
-</span><span id="ScrapboxClient-161"><a href="#ScrapboxClient-161"><span class="linenos">161</span></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">pat</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">service_account_key</span><span class="p">:</span>
-</span><span id="ScrapboxClient-162"><a href="#ScrapboxClient-162"><span class="linenos">162</span></a>            <span class="c1"># Attach the credential per request instead of as a default header:</span>
-</span><span id="ScrapboxClient-163"><a href="#ScrapboxClient-163"><span class="linenos">163</span></a>            <span class="c1"># get_file() follows redirects to third-party hosts (Gyazo), which must</span>
-</span><span id="ScrapboxClient-164"><a href="#ScrapboxClient-164"><span class="linenos">164</span></a>            <span class="c1"># not receive it.</span>
-</span><span id="ScrapboxClient-165"><a href="#ScrapboxClient-165"><span class="linenos">165</span></a>            <span class="bp">self</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">event_hooks</span><span class="p">[</span><span class="s2">&quot;request&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_attach_credential</span><span class="p">)</span>
-</span><span id="ScrapboxClient-166"><a href="#ScrapboxClient-166"><span class="linenos">166</span></a>
-</span><span id="ScrapboxClient-167"><a href="#ScrapboxClient-167"><span class="linenos">167</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">_attach_credential</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">:</span> <span class="n">httpx</span><span class="o">.</span><span class="n">Request</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="ScrapboxClient-168"><a href="#ScrapboxClient-168"><span class="linenos">168</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Attach the header credential to requests sent to Scrapbox.</span>
-</span><span id="ScrapboxClient-169"><a href="#ScrapboxClient-169"><span class="linenos">169</span></a>
-</span><span id="ScrapboxClient-170"><a href="#ScrapboxClient-170"><span class="linenos">170</span></a><span class="sd">        Args:</span>
-</span><span id="ScrapboxClient-171"><a href="#ScrapboxClient-171"><span class="linenos">171</span></a><span class="sd">            request: The outgoing request.</span>
-</span><span id="ScrapboxClient-172"><a href="#ScrapboxClient-172"><span class="linenos">172</span></a><span class="sd">        &quot;&quot;&quot;</span>
-</span><span id="ScrapboxClient-173"><a href="#ScrapboxClient-173"><span class="linenos">173</span></a>        <span class="k">if</span> <span class="n">request</span><span class="o">.</span><span class="n">url</span><span class="o">.</span><span class="n">host</span> <span class="o">!=</span> <span class="n">SCRAPBOX_HOST</span><span class="p">:</span>
-</span><span id="ScrapboxClient-174"><a href="#ScrapboxClient-174"><span class="linenos">174</span></a>            <span class="k">return</span>
-</span><span id="ScrapboxClient-175"><a href="#ScrapboxClient-175"><span class="linenos">175</span></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">pat</span><span class="p">:</span>
-</span><span id="ScrapboxClient-176"><a href="#ScrapboxClient-176"><span class="linenos">176</span></a>            <span class="n">request</span><span class="o">.</span><span class="n">headers</span><span class="p">[</span><span class="n">PAT_HEADER</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pat</span>
-</span><span id="ScrapboxClient-177"><a href="#ScrapboxClient-177"><span class="linenos">177</span></a>        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">service_account_key</span><span class="p">:</span>
-</span><span id="ScrapboxClient-178"><a href="#ScrapboxClient-178"><span class="linenos">178</span></a>            <span class="n">request</span><span class="o">.</span><span class="n">headers</span><span class="p">[</span><span class="n">SERVICE_ACCOUNT_HEADER</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">service_account_key</span>
-</span><span id="ScrapboxClient-179"><a href="#ScrapboxClient-179"><span class="linenos">179</span></a>
-</span><span id="ScrapboxClient-180"><a href="#ScrapboxClient-180"><span class="linenos">180</span></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__enter__</span><span class="p">(</span><span class="bp">self</span><span class="p">:</span> <span class="n">Self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
-</span><span id="ScrapboxClient-181"><a href="#ScrapboxClient-181"><span class="linenos">181</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Enter the runtime context related to this object.&quot;&quot;&quot;</span>
-</span><span id="ScrapboxClient-182"><a href="#ScrapboxClient-182"><span class="linenos">182</span></a>        <span class="k">return</span> <span class="bp">self</span>
-</span><span id="ScrapboxClient-183"><a href="#ScrapboxClient-183"><span class="linenos">183</span></a>
-</span><span id="ScrapboxClient-184"><a href="#ScrapboxClient-184"><span class="linenos">184</span></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__exit__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">typ</span><span class="p">:</span> <span class="nb">type</span><span class="p">[</span><span class="ne">BaseException</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">exc</span><span class="p">:</span> <span class="ne">BaseException</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">tb</span><span class="p">:</span> <span class="n">TracebackType</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="o">/</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="ScrapboxClient-185"><a href="#ScrapboxClient-185"><span class="linenos">185</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Exit the runtime context related to this object.&quot;&quot;&quot;</span>
-</span><span id="ScrapboxClient-186"><a href="#ScrapboxClient-186"><span class="linenos">186</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
-</span><span id="ScrapboxClient-187"><a href="#ScrapboxClient-187"><span class="linenos">187</span></a>
-</span><span id="ScrapboxClient-188"><a href="#ScrapboxClient-188"><span class="linenos">188</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">close</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="ScrapboxClient-189"><a href="#ScrapboxClient-189"><span class="linenos">189</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Close the HTTP client.&quot;&quot;&quot;</span>
-</span><span id="ScrapboxClient-190"><a href="#ScrapboxClient-190"><span class="linenos">190</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="ScrapboxClient-141"><a href="#ScrapboxClient-141"><span class="linenos">141</span></a><span class="k">class</span><span class="w"> </span><span class="nc">ScrapboxClient</span><span class="p">:</span>
+</span><span id="ScrapboxClient-142"><a href="#ScrapboxClient-142"><span class="linenos">142</span></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Scrapbox API client.</span>
+</span><span id="ScrapboxClient-143"><a href="#ScrapboxClient-143"><span class="linenos">143</span></a>
+</span><span id="ScrapboxClient-144"><a href="#ScrapboxClient-144"><span class="linenos">144</span></a><span class="sd">    This client provides methods to interact with the Scrapbox API,</span>
+</span><span id="ScrapboxClient-145"><a href="#ScrapboxClient-145"><span class="linenos">145</span></a><span class="sd">    including retrieving page lists, page details, page text, and files.</span>
+</span><span id="ScrapboxClient-146"><a href="#ScrapboxClient-146"><span class="linenos">146</span></a><span class="sd">    &quot;&quot;&quot;</span>
+</span><span id="ScrapboxClient-147"><a href="#ScrapboxClient-147"><span class="linenos">147</span></a>
+</span><span id="ScrapboxClient-148"><a href="#ScrapboxClient-148"><span class="linenos">148</span></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Base URL for the Scrapbox API.&quot;&quot;&quot;</span>
+</span><span id="ScrapboxClient-149"><a href="#ScrapboxClient-149"><span class="linenos">149</span></a>    <span class="n">BASE_URL</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">SCRAPBOX_ORIGIN</span><span class="si">}</span><span class="s2">/api&quot;</span>
+</span><span id="ScrapboxClient-150"><a href="#ScrapboxClient-150"><span class="linenos">150</span></a>
+</span><span id="ScrapboxClient-151"><a href="#ScrapboxClient-151"><span class="linenos">151</span></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+</span><span id="ScrapboxClient-152"><a href="#ScrapboxClient-152"><span class="linenos">152</span></a>        <span class="bp">self</span><span class="p">,</span>
+</span><span id="ScrapboxClient-153"><a href="#ScrapboxClient-153"><span class="linenos">153</span></a>        <span class="n">connect_sid</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="ScrapboxClient-154"><a href="#ScrapboxClient-154"><span class="linenos">154</span></a>        <span class="n">pat</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="ScrapboxClient-155"><a href="#ScrapboxClient-155"><span class="linenos">155</span></a>        <span class="n">service_account_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="ScrapboxClient-156"><a href="#ScrapboxClient-156"><span class="linenos">156</span></a>        <span class="n">transport</span><span class="p">:</span> <span class="n">httpx</span><span class="o">.</span><span class="n">BaseTransport</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="ScrapboxClient-157"><a href="#ScrapboxClient-157"><span class="linenos">157</span></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="ScrapboxClient-158"><a href="#ScrapboxClient-158"><span class="linenos">158</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize the Scrapbox API client.</span>
+</span><span id="ScrapboxClient-159"><a href="#ScrapboxClient-159"><span class="linenos">159</span></a>
+</span><span id="ScrapboxClient-160"><a href="#ScrapboxClient-160"><span class="linenos">160</span></a><span class="sd">        Authentication is optional for public projects. Only one credential is ever</span>
+</span><span id="ScrapboxClient-161"><a href="#ScrapboxClient-161"><span class="linenos">161</span></a><span class="sd">        sent: given more than one, a personal access token wins over a service</span>
+</span><span id="ScrapboxClient-162"><a href="#ScrapboxClient-162"><span class="linenos">162</span></a><span class="sd">        account key, which in turn wins over a cookie.</span>
+</span><span id="ScrapboxClient-163"><a href="#ScrapboxClient-163"><span class="linenos">163</span></a>
+</span><span id="ScrapboxClient-164"><a href="#ScrapboxClient-164"><span class="linenos">164</span></a><span class="sd">        Args:</span>
+</span><span id="ScrapboxClient-165"><a href="#ScrapboxClient-165"><span class="linenos">165</span></a><span class="sd">            connect_sid: Scrapbox authentication cookie (connect.sid).</span>
+</span><span id="ScrapboxClient-166"><a href="#ScrapboxClient-166"><span class="linenos">166</span></a><span class="sd">            pat: Scrapbox personal access token, sent as the `x-personal-access-token`</span>
+</span><span id="ScrapboxClient-167"><a href="#ScrapboxClient-167"><span class="linenos">167</span></a><span class="sd">                header.</span>
+</span><span id="ScrapboxClient-168"><a href="#ScrapboxClient-168"><span class="linenos">168</span></a><span class="sd">            service_account_key: Access key of a service account, sent as the</span>
+</span><span id="ScrapboxClient-169"><a href="#ScrapboxClient-169"><span class="linenos">169</span></a><span class="sd">                `x-service-account-access-key` header. A service account is registered</span>
+</span><span id="ScrapboxClient-170"><a href="#ScrapboxClient-170"><span class="linenos">170</span></a><span class="sd">                on one project of a Business plan and can read and write only that</span>
+</span><span id="ScrapboxClient-171"><a href="#ScrapboxClient-171"><span class="linenos">171</span></a><span class="sd">                one: any other project, even a public one, answers 400. It stands for</span>
+</span><span id="ScrapboxClient-172"><a href="#ScrapboxClient-172"><span class="linenos">172</span></a><span class="sd">                no user, so `get_me` and `get_projects` are out of its reach, and</span>
+</span><span id="ScrapboxClient-173"><a href="#ScrapboxClient-173"><span class="linenos">173</span></a><span class="sd">                `get_project` refuses it as well.</span>
+</span><span id="ScrapboxClient-174"><a href="#ScrapboxClient-174"><span class="linenos">174</span></a><span class="sd">            transport: Transport used by the underlying HTTP client. Intended for</span>
+</span><span id="ScrapboxClient-175"><a href="#ScrapboxClient-175"><span class="linenos">175</span></a><span class="sd">                tests, which pass an `httpx.MockTransport` so that header handling</span>
+</span><span id="ScrapboxClient-176"><a href="#ScrapboxClient-176"><span class="linenos">176</span></a><span class="sd">                is still exercised.</span>
+</span><span id="ScrapboxClient-177"><a href="#ScrapboxClient-177"><span class="linenos">177</span></a><span class="sd">        &quot;&quot;&quot;</span>
+</span><span id="ScrapboxClient-178"><a href="#ScrapboxClient-178"><span class="linenos">178</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">pat</span> <span class="o">=</span> <span class="n">pat</span>
+</span><span id="ScrapboxClient-179"><a href="#ScrapboxClient-179"><span class="linenos">179</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">service_account_key</span> <span class="o">=</span> <span class="kc">None</span> <span class="k">if</span> <span class="n">pat</span> <span class="k">else</span> <span class="n">service_account_key</span>
+</span><span id="ScrapboxClient-180"><a href="#ScrapboxClient-180"><span class="linenos">180</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">connect_sid</span> <span class="o">=</span> <span class="kc">None</span> <span class="k">if</span> <span class="n">pat</span> <span class="ow">or</span> <span class="n">service_account_key</span> <span class="k">else</span> <span class="n">connect_sid</span>
+</span><span id="ScrapboxClient-181"><a href="#ScrapboxClient-181"><span class="linenos">181</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">client</span> <span class="o">=</span> <span class="n">httpx</span><span class="o">.</span><span class="n">Client</span><span class="p">(</span>
+</span><span id="ScrapboxClient-182"><a href="#ScrapboxClient-182"><span class="linenos">182</span></a>            <span class="n">cookies</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;connect.sid&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">connect_sid</span><span class="p">}</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">connect_sid</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="ScrapboxClient-183"><a href="#ScrapboxClient-183"><span class="linenos">183</span></a>            <span class="n">follow_redirects</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="ScrapboxClient-184"><a href="#ScrapboxClient-184"><span class="linenos">184</span></a>            <span class="n">transport</span><span class="o">=</span><span class="n">transport</span><span class="p">,</span>
+</span><span id="ScrapboxClient-185"><a href="#ScrapboxClient-185"><span class="linenos">185</span></a>        <span class="p">)</span>
+</span><span id="ScrapboxClient-186"><a href="#ScrapboxClient-186"><span class="linenos">186</span></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">pat</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">service_account_key</span><span class="p">:</span>
+</span><span id="ScrapboxClient-187"><a href="#ScrapboxClient-187"><span class="linenos">187</span></a>            <span class="c1"># Attach the credential per request instead of as a default header:</span>
+</span><span id="ScrapboxClient-188"><a href="#ScrapboxClient-188"><span class="linenos">188</span></a>            <span class="c1"># get_file() follows redirects to third-party hosts (Gyazo), which must</span>
+</span><span id="ScrapboxClient-189"><a href="#ScrapboxClient-189"><span class="linenos">189</span></a>            <span class="c1"># not receive it.</span>
+</span><span id="ScrapboxClient-190"><a href="#ScrapboxClient-190"><span class="linenos">190</span></a>            <span class="bp">self</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">event_hooks</span><span class="p">[</span><span class="s2">&quot;request&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_attach_credential</span><span class="p">)</span>
 </span><span id="ScrapboxClient-191"><a href="#ScrapboxClient-191"><span class="linenos">191</span></a>
-</span><span id="ScrapboxClient-192"><a href="#ScrapboxClient-192"><span class="linenos">192</span></a>    <span class="nd">@staticmethod</span>
-</span><span id="ScrapboxClient-193"><a href="#ScrapboxClient-193"><span class="linenos">193</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">_error_detail</span><span class="p">(</span><span class="n">response</span><span class="p">:</span> <span class="n">httpx</span><span class="o">.</span><span class="n">Response</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="ScrapboxClient-194"><a href="#ScrapboxClient-194"><span class="linenos">194</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Read the explanation the API put in an error body.</span>
-</span><span id="ScrapboxClient-195"><a href="#ScrapboxClient-195"><span class="linenos">195</span></a>
-</span><span id="ScrapboxClient-196"><a href="#ScrapboxClient-196"><span class="linenos">196</span></a><span class="sd">        Most of `/api/` answers `{&quot;name&quot;: ..., &quot;message&quot;: ...}`; the oEmbed proxy and</span>
-</span><span id="ScrapboxClient-197"><a href="#ScrapboxClient-197"><span class="linenos">197</span></a><span class="sd">        the edit endpoints answer with `message` alone.</span>
-</span><span id="ScrapboxClient-198"><a href="#ScrapboxClient-198"><span class="linenos">198</span></a>
-</span><span id="ScrapboxClient-199"><a href="#ScrapboxClient-199"><span class="linenos">199</span></a><span class="sd">        Args:</span>
-</span><span id="ScrapboxClient-200"><a href="#ScrapboxClient-200"><span class="linenos">200</span></a><span class="sd">            response: The error response to read.</span>
-</span><span id="ScrapboxClient-201"><a href="#ScrapboxClient-201"><span class="linenos">201</span></a>
-</span><span id="ScrapboxClient-202"><a href="#ScrapboxClient-202"><span class="linenos">202</span></a><span class="sd">        Returns:</span>
-</span><span id="ScrapboxClient-203"><a href="#ScrapboxClient-203"><span class="linenos">203</span></a><span class="sd">            The explanation, or None if the body carries none.</span>
-</span><span id="ScrapboxClient-204"><a href="#ScrapboxClient-204"><span class="linenos">204</span></a><span class="sd">        &quot;&quot;&quot;</span>
-</span><span id="ScrapboxClient-205"><a href="#ScrapboxClient-205"><span class="linenos">205</span></a>        <span class="k">try</span><span class="p">:</span>
-</span><span id="ScrapboxClient-206"><a href="#ScrapboxClient-206"><span class="linenos">206</span></a>            <span class="n">body</span> <span class="o">=</span> <span class="n">response</span><span class="o">.</span><span class="n">json</span><span class="p">()</span>
-</span><span id="ScrapboxClient-207"><a href="#ScrapboxClient-207"><span class="linenos">207</span></a>        <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
-</span><span id="ScrapboxClient-208"><a href="#ScrapboxClient-208"><span class="linenos">208</span></a>            <span class="k">return</span> <span class="kc">None</span>
-</span><span id="ScrapboxClient-209"><a href="#ScrapboxClient-209"><span class="linenos">209</span></a>        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">body</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
-</span><span id="ScrapboxClient-210"><a href="#ScrapboxClient-210"><span class="linenos">210</span></a>            <span class="k">return</span> <span class="kc">None</span>
-</span><span id="ScrapboxClient-211"><a href="#ScrapboxClient-211"><span class="linenos">211</span></a>        <span class="n">message</span> <span class="o">=</span> <span class="n">body</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;message&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">body</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;error&quot;</span><span class="p">)</span>
-</span><span id="ScrapboxClient-212"><a href="#ScrapboxClient-212"><span class="linenos">212</span></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">message</span><span class="p">:</span>
-</span><span id="ScrapboxClient-213"><a href="#ScrapboxClient-213"><span class="linenos">213</span></a>            <span class="k">return</span> <span class="kc">None</span>
-</span><span id="ScrapboxClient-214"><a href="#ScrapboxClient-214"><span class="linenos">214</span></a>        <span class="n">name</span> <span class="o">=</span> <span class="n">body</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">)</span>
-</span><span id="ScrapboxClient-215"><a href="#ScrapboxClient-215"><span class="linenos">215</span></a>        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">message</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">if</span> <span class="n">name</span> <span class="k">else</span> <span class="nb">str</span><span class="p">(</span><span class="n">message</span><span class="p">)</span>
+</span><span id="ScrapboxClient-192"><a href="#ScrapboxClient-192"><span class="linenos">192</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">_attach_credential</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">:</span> <span class="n">httpx</span><span class="o">.</span><span class="n">Request</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="ScrapboxClient-193"><a href="#ScrapboxClient-193"><span class="linenos">193</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Attach the header credential to requests sent to Scrapbox.</span>
+</span><span id="ScrapboxClient-194"><a href="#ScrapboxClient-194"><span class="linenos">194</span></a>
+</span><span id="ScrapboxClient-195"><a href="#ScrapboxClient-195"><span class="linenos">195</span></a><span class="sd">        Args:</span>
+</span><span id="ScrapboxClient-196"><a href="#ScrapboxClient-196"><span class="linenos">196</span></a><span class="sd">            request: The outgoing request.</span>
+</span><span id="ScrapboxClient-197"><a href="#ScrapboxClient-197"><span class="linenos">197</span></a><span class="sd">        &quot;&quot;&quot;</span>
+</span><span id="ScrapboxClient-198"><a href="#ScrapboxClient-198"><span class="linenos">198</span></a>        <span class="k">if</span> <span class="n">request</span><span class="o">.</span><span class="n">url</span><span class="o">.</span><span class="n">host</span> <span class="o">!=</span> <span class="n">SCRAPBOX_HOST</span><span class="p">:</span>
+</span><span id="ScrapboxClient-199"><a href="#ScrapboxClient-199"><span class="linenos">199</span></a>            <span class="k">return</span>
+</span><span id="ScrapboxClient-200"><a href="#ScrapboxClient-200"><span class="linenos">200</span></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">pat</span><span class="p">:</span>
+</span><span id="ScrapboxClient-201"><a href="#ScrapboxClient-201"><span class="linenos">201</span></a>            <span class="n">request</span><span class="o">.</span><span class="n">headers</span><span class="p">[</span><span class="n">PAT_HEADER</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pat</span>
+</span><span id="ScrapboxClient-202"><a href="#ScrapboxClient-202"><span class="linenos">202</span></a>        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">service_account_key</span><span class="p">:</span>
+</span><span id="ScrapboxClient-203"><a href="#ScrapboxClient-203"><span class="linenos">203</span></a>            <span class="n">request</span><span class="o">.</span><span class="n">headers</span><span class="p">[</span><span class="n">SERVICE_ACCOUNT_HEADER</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">service_account_key</span>
+</span><span id="ScrapboxClient-204"><a href="#ScrapboxClient-204"><span class="linenos">204</span></a>
+</span><span id="ScrapboxClient-205"><a href="#ScrapboxClient-205"><span class="linenos">205</span></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__enter__</span><span class="p">(</span><span class="bp">self</span><span class="p">:</span> <span class="n">Self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Self</span><span class="p">:</span>
+</span><span id="ScrapboxClient-206"><a href="#ScrapboxClient-206"><span class="linenos">206</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Enter the runtime context related to this object.&quot;&quot;&quot;</span>
+</span><span id="ScrapboxClient-207"><a href="#ScrapboxClient-207"><span class="linenos">207</span></a>        <span class="k">return</span> <span class="bp">self</span>
+</span><span id="ScrapboxClient-208"><a href="#ScrapboxClient-208"><span class="linenos">208</span></a>
+</span><span id="ScrapboxClient-209"><a href="#ScrapboxClient-209"><span class="linenos">209</span></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__exit__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">typ</span><span class="p">:</span> <span class="nb">type</span><span class="p">[</span><span class="ne">BaseException</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">exc</span><span class="p">:</span> <span class="ne">BaseException</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">tb</span><span class="p">:</span> <span class="n">TracebackType</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="o">/</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="ScrapboxClient-210"><a href="#ScrapboxClient-210"><span class="linenos">210</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Exit the runtime context related to this object.&quot;&quot;&quot;</span>
+</span><span id="ScrapboxClient-211"><a href="#ScrapboxClient-211"><span class="linenos">211</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</span><span id="ScrapboxClient-212"><a href="#ScrapboxClient-212"><span class="linenos">212</span></a>
+</span><span id="ScrapboxClient-213"><a href="#ScrapboxClient-213"><span class="linenos">213</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">close</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="ScrapboxClient-214"><a href="#ScrapboxClient-214"><span class="linenos">214</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Close the HTTP client.&quot;&quot;&quot;</span>
+</span><span id="ScrapboxClient-215"><a href="#ScrapboxClient-215"><span class="linenos">215</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
 </span><span id="ScrapboxClient-216"><a href="#ScrapboxClient-216"><span class="linenos">216</span></a>
-</span><span id="ScrapboxClient-217"><a href="#ScrapboxClient-217"><span class="linenos">217</span></a>    <span class="nd">@classmethod</span>
-</span><span id="ScrapboxClient-218"><a href="#ScrapboxClient-218"><span class="linenos">218</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">_raise_for_status</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">response</span><span class="p">:</span> <span class="n">httpx</span><span class="o">.</span><span class="n">Response</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="ScrapboxClient-217"><a href="#ScrapboxClient-217"><span class="linenos">217</span></a>    <span class="nd">@staticmethod</span>
+</span><span id="ScrapboxClient-218"><a href="#ScrapboxClient-218"><span class="linenos">218</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">_raise_for_status</span><span class="p">(</span><span class="n">response</span><span class="p">:</span> <span class="n">httpx</span><span class="o">.</span><span class="n">Response</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
 </span><span id="ScrapboxClient-219"><a href="#ScrapboxClient-219"><span class="linenos">219</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Turn an error response into an exception.</span>
 </span><span id="ScrapboxClient-220"><a href="#ScrapboxClient-220"><span class="linenos">220</span></a>
 </span><span id="ScrapboxClient-221"><a href="#ScrapboxClient-221"><span class="linenos">221</span></a><span class="sd">        The status code alone rarely says what went wrong -- a service account asked</span>
@@ -3599,7 +3655,7 @@ account, so all four lists are needed to resolve an author id to a name.</p>
 </span><span id="ScrapboxClient-239"><a href="#ScrapboxClient-239"><span class="linenos">239</span></a>        <span class="k">try</span><span class="p">:</span>
 </span><span id="ScrapboxClient-240"><a href="#ScrapboxClient-240"><span class="linenos">240</span></a>            <span class="n">response</span><span class="o">.</span><span class="n">raise_for_status</span><span class="p">()</span>
 </span><span id="ScrapboxClient-241"><a href="#ScrapboxClient-241"><span class="linenos">241</span></a>        <span class="k">except</span> <span class="n">httpx</span><span class="o">.</span><span class="n">HTTPStatusError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-</span><span id="ScrapboxClient-242"><a href="#ScrapboxClient-242"><span class="linenos">242</span></a>            <span class="n">detail</span> <span class="o">=</span> <span class="bp">cls</span><span class="o">.</span><span class="n">_error_detail</span><span class="p">(</span><span class="n">response</span><span class="p">)</span>
+</span><span id="ScrapboxClient-242"><a href="#ScrapboxClient-242"><span class="linenos">242</span></a>            <span class="n">detail</span> <span class="o">=</span> <span class="n">error_detail</span><span class="p">(</span><span class="n">response</span><span class="p">)</span>
 </span><span id="ScrapboxClient-243"><a href="#ScrapboxClient-243"><span class="linenos">243</span></a>            <span class="k">if</span> <span class="n">detail</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
 </span><span id="ScrapboxClient-244"><a href="#ScrapboxClient-244"><span class="linenos">244</span></a>                <span class="k">raise</span>
 </span><span id="ScrapboxClient-245"><a href="#ScrapboxClient-245"><span class="linenos">245</span></a>            <span class="n">msg</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="se">\n</span><span class="si">{</span><span class="n">detail</span><span class="si">}</span><span class="s2">&quot;</span>
@@ -4230,46 +4286,46 @@ including retrieving page lists, page details, page text, and files.</p>
 
     </div>
     <a class="headerlink" href="#ScrapboxClient.__init__"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="ScrapboxClient.__init__-126"><a href="#ScrapboxClient.__init__-126"><span class="linenos">126</span></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
-</span><span id="ScrapboxClient.__init__-127"><a href="#ScrapboxClient.__init__-127"><span class="linenos">127</span></a>        <span class="bp">self</span><span class="p">,</span>
-</span><span id="ScrapboxClient.__init__-128"><a href="#ScrapboxClient.__init__-128"><span class="linenos">128</span></a>        <span class="n">connect_sid</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-</span><span id="ScrapboxClient.__init__-129"><a href="#ScrapboxClient.__init__-129"><span class="linenos">129</span></a>        <span class="n">pat</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-</span><span id="ScrapboxClient.__init__-130"><a href="#ScrapboxClient.__init__-130"><span class="linenos">130</span></a>        <span class="n">service_account_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-</span><span id="ScrapboxClient.__init__-131"><a href="#ScrapboxClient.__init__-131"><span class="linenos">131</span></a>        <span class="n">transport</span><span class="p">:</span> <span class="n">httpx</span><span class="o">.</span><span class="n">BaseTransport</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-</span><span id="ScrapboxClient.__init__-132"><a href="#ScrapboxClient.__init__-132"><span class="linenos">132</span></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="ScrapboxClient.__init__-133"><a href="#ScrapboxClient.__init__-133"><span class="linenos">133</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize the Scrapbox API client.</span>
-</span><span id="ScrapboxClient.__init__-134"><a href="#ScrapboxClient.__init__-134"><span class="linenos">134</span></a>
-</span><span id="ScrapboxClient.__init__-135"><a href="#ScrapboxClient.__init__-135"><span class="linenos">135</span></a><span class="sd">        Authentication is optional for public projects. Only one credential is ever</span>
-</span><span id="ScrapboxClient.__init__-136"><a href="#ScrapboxClient.__init__-136"><span class="linenos">136</span></a><span class="sd">        sent: given more than one, a personal access token wins over a service</span>
-</span><span id="ScrapboxClient.__init__-137"><a href="#ScrapboxClient.__init__-137"><span class="linenos">137</span></a><span class="sd">        account key, which in turn wins over a cookie.</span>
-</span><span id="ScrapboxClient.__init__-138"><a href="#ScrapboxClient.__init__-138"><span class="linenos">138</span></a>
-</span><span id="ScrapboxClient.__init__-139"><a href="#ScrapboxClient.__init__-139"><span class="linenos">139</span></a><span class="sd">        Args:</span>
-</span><span id="ScrapboxClient.__init__-140"><a href="#ScrapboxClient.__init__-140"><span class="linenos">140</span></a><span class="sd">            connect_sid: Scrapbox authentication cookie (connect.sid).</span>
-</span><span id="ScrapboxClient.__init__-141"><a href="#ScrapboxClient.__init__-141"><span class="linenos">141</span></a><span class="sd">            pat: Scrapbox personal access token, sent as the `x-personal-access-token`</span>
-</span><span id="ScrapboxClient.__init__-142"><a href="#ScrapboxClient.__init__-142"><span class="linenos">142</span></a><span class="sd">                header.</span>
-</span><span id="ScrapboxClient.__init__-143"><a href="#ScrapboxClient.__init__-143"><span class="linenos">143</span></a><span class="sd">            service_account_key: Access key of a service account, sent as the</span>
-</span><span id="ScrapboxClient.__init__-144"><a href="#ScrapboxClient.__init__-144"><span class="linenos">144</span></a><span class="sd">                `x-service-account-access-key` header. A service account is registered</span>
-</span><span id="ScrapboxClient.__init__-145"><a href="#ScrapboxClient.__init__-145"><span class="linenos">145</span></a><span class="sd">                on one project of a Business plan and can read and write only that</span>
-</span><span id="ScrapboxClient.__init__-146"><a href="#ScrapboxClient.__init__-146"><span class="linenos">146</span></a><span class="sd">                one: any other project, even a public one, answers 400. It stands for</span>
-</span><span id="ScrapboxClient.__init__-147"><a href="#ScrapboxClient.__init__-147"><span class="linenos">147</span></a><span class="sd">                no user, so `get_me` and `get_projects` are out of its reach, and</span>
-</span><span id="ScrapboxClient.__init__-148"><a href="#ScrapboxClient.__init__-148"><span class="linenos">148</span></a><span class="sd">                `get_project` refuses it as well.</span>
-</span><span id="ScrapboxClient.__init__-149"><a href="#ScrapboxClient.__init__-149"><span class="linenos">149</span></a><span class="sd">            transport: Transport used by the underlying HTTP client. Intended for</span>
-</span><span id="ScrapboxClient.__init__-150"><a href="#ScrapboxClient.__init__-150"><span class="linenos">150</span></a><span class="sd">                tests, which pass an `httpx.MockTransport` so that header handling</span>
-</span><span id="ScrapboxClient.__init__-151"><a href="#ScrapboxClient.__init__-151"><span class="linenos">151</span></a><span class="sd">                is still exercised.</span>
-</span><span id="ScrapboxClient.__init__-152"><a href="#ScrapboxClient.__init__-152"><span class="linenos">152</span></a><span class="sd">        &quot;&quot;&quot;</span>
-</span><span id="ScrapboxClient.__init__-153"><a href="#ScrapboxClient.__init__-153"><span class="linenos">153</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">pat</span> <span class="o">=</span> <span class="n">pat</span>
-</span><span id="ScrapboxClient.__init__-154"><a href="#ScrapboxClient.__init__-154"><span class="linenos">154</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">service_account_key</span> <span class="o">=</span> <span class="kc">None</span> <span class="k">if</span> <span class="n">pat</span> <span class="k">else</span> <span class="n">service_account_key</span>
-</span><span id="ScrapboxClient.__init__-155"><a href="#ScrapboxClient.__init__-155"><span class="linenos">155</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">connect_sid</span> <span class="o">=</span> <span class="kc">None</span> <span class="k">if</span> <span class="n">pat</span> <span class="ow">or</span> <span class="n">service_account_key</span> <span class="k">else</span> <span class="n">connect_sid</span>
-</span><span id="ScrapboxClient.__init__-156"><a href="#ScrapboxClient.__init__-156"><span class="linenos">156</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">client</span> <span class="o">=</span> <span class="n">httpx</span><span class="o">.</span><span class="n">Client</span><span class="p">(</span>
-</span><span id="ScrapboxClient.__init__-157"><a href="#ScrapboxClient.__init__-157"><span class="linenos">157</span></a>            <span class="n">cookies</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;connect.sid&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">connect_sid</span><span class="p">}</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">connect_sid</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
-</span><span id="ScrapboxClient.__init__-158"><a href="#ScrapboxClient.__init__-158"><span class="linenos">158</span></a>            <span class="n">follow_redirects</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-</span><span id="ScrapboxClient.__init__-159"><a href="#ScrapboxClient.__init__-159"><span class="linenos">159</span></a>            <span class="n">transport</span><span class="o">=</span><span class="n">transport</span><span class="p">,</span>
-</span><span id="ScrapboxClient.__init__-160"><a href="#ScrapboxClient.__init__-160"><span class="linenos">160</span></a>        <span class="p">)</span>
-</span><span id="ScrapboxClient.__init__-161"><a href="#ScrapboxClient.__init__-161"><span class="linenos">161</span></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">pat</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">service_account_key</span><span class="p">:</span>
-</span><span id="ScrapboxClient.__init__-162"><a href="#ScrapboxClient.__init__-162"><span class="linenos">162</span></a>            <span class="c1"># Attach the credential per request instead of as a default header:</span>
-</span><span id="ScrapboxClient.__init__-163"><a href="#ScrapboxClient.__init__-163"><span class="linenos">163</span></a>            <span class="c1"># get_file() follows redirects to third-party hosts (Gyazo), which must</span>
-</span><span id="ScrapboxClient.__init__-164"><a href="#ScrapboxClient.__init__-164"><span class="linenos">164</span></a>            <span class="c1"># not receive it.</span>
-</span><span id="ScrapboxClient.__init__-165"><a href="#ScrapboxClient.__init__-165"><span class="linenos">165</span></a>            <span class="bp">self</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">event_hooks</span><span class="p">[</span><span class="s2">&quot;request&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_attach_credential</span><span class="p">)</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="ScrapboxClient.__init__-151"><a href="#ScrapboxClient.__init__-151"><span class="linenos">151</span></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+</span><span id="ScrapboxClient.__init__-152"><a href="#ScrapboxClient.__init__-152"><span class="linenos">152</span></a>        <span class="bp">self</span><span class="p">,</span>
+</span><span id="ScrapboxClient.__init__-153"><a href="#ScrapboxClient.__init__-153"><span class="linenos">153</span></a>        <span class="n">connect_sid</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="ScrapboxClient.__init__-154"><a href="#ScrapboxClient.__init__-154"><span class="linenos">154</span></a>        <span class="n">pat</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="ScrapboxClient.__init__-155"><a href="#ScrapboxClient.__init__-155"><span class="linenos">155</span></a>        <span class="n">service_account_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="ScrapboxClient.__init__-156"><a href="#ScrapboxClient.__init__-156"><span class="linenos">156</span></a>        <span class="n">transport</span><span class="p">:</span> <span class="n">httpx</span><span class="o">.</span><span class="n">BaseTransport</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="ScrapboxClient.__init__-157"><a href="#ScrapboxClient.__init__-157"><span class="linenos">157</span></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="ScrapboxClient.__init__-158"><a href="#ScrapboxClient.__init__-158"><span class="linenos">158</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize the Scrapbox API client.</span>
+</span><span id="ScrapboxClient.__init__-159"><a href="#ScrapboxClient.__init__-159"><span class="linenos">159</span></a>
+</span><span id="ScrapboxClient.__init__-160"><a href="#ScrapboxClient.__init__-160"><span class="linenos">160</span></a><span class="sd">        Authentication is optional for public projects. Only one credential is ever</span>
+</span><span id="ScrapboxClient.__init__-161"><a href="#ScrapboxClient.__init__-161"><span class="linenos">161</span></a><span class="sd">        sent: given more than one, a personal access token wins over a service</span>
+</span><span id="ScrapboxClient.__init__-162"><a href="#ScrapboxClient.__init__-162"><span class="linenos">162</span></a><span class="sd">        account key, which in turn wins over a cookie.</span>
+</span><span id="ScrapboxClient.__init__-163"><a href="#ScrapboxClient.__init__-163"><span class="linenos">163</span></a>
+</span><span id="ScrapboxClient.__init__-164"><a href="#ScrapboxClient.__init__-164"><span class="linenos">164</span></a><span class="sd">        Args:</span>
+</span><span id="ScrapboxClient.__init__-165"><a href="#ScrapboxClient.__init__-165"><span class="linenos">165</span></a><span class="sd">            connect_sid: Scrapbox authentication cookie (connect.sid).</span>
+</span><span id="ScrapboxClient.__init__-166"><a href="#ScrapboxClient.__init__-166"><span class="linenos">166</span></a><span class="sd">            pat: Scrapbox personal access token, sent as the `x-personal-access-token`</span>
+</span><span id="ScrapboxClient.__init__-167"><a href="#ScrapboxClient.__init__-167"><span class="linenos">167</span></a><span class="sd">                header.</span>
+</span><span id="ScrapboxClient.__init__-168"><a href="#ScrapboxClient.__init__-168"><span class="linenos">168</span></a><span class="sd">            service_account_key: Access key of a service account, sent as the</span>
+</span><span id="ScrapboxClient.__init__-169"><a href="#ScrapboxClient.__init__-169"><span class="linenos">169</span></a><span class="sd">                `x-service-account-access-key` header. A service account is registered</span>
+</span><span id="ScrapboxClient.__init__-170"><a href="#ScrapboxClient.__init__-170"><span class="linenos">170</span></a><span class="sd">                on one project of a Business plan and can read and write only that</span>
+</span><span id="ScrapboxClient.__init__-171"><a href="#ScrapboxClient.__init__-171"><span class="linenos">171</span></a><span class="sd">                one: any other project, even a public one, answers 400. It stands for</span>
+</span><span id="ScrapboxClient.__init__-172"><a href="#ScrapboxClient.__init__-172"><span class="linenos">172</span></a><span class="sd">                no user, so `get_me` and `get_projects` are out of its reach, and</span>
+</span><span id="ScrapboxClient.__init__-173"><a href="#ScrapboxClient.__init__-173"><span class="linenos">173</span></a><span class="sd">                `get_project` refuses it as well.</span>
+</span><span id="ScrapboxClient.__init__-174"><a href="#ScrapboxClient.__init__-174"><span class="linenos">174</span></a><span class="sd">            transport: Transport used by the underlying HTTP client. Intended for</span>
+</span><span id="ScrapboxClient.__init__-175"><a href="#ScrapboxClient.__init__-175"><span class="linenos">175</span></a><span class="sd">                tests, which pass an `httpx.MockTransport` so that header handling</span>
+</span><span id="ScrapboxClient.__init__-176"><a href="#ScrapboxClient.__init__-176"><span class="linenos">176</span></a><span class="sd">                is still exercised.</span>
+</span><span id="ScrapboxClient.__init__-177"><a href="#ScrapboxClient.__init__-177"><span class="linenos">177</span></a><span class="sd">        &quot;&quot;&quot;</span>
+</span><span id="ScrapboxClient.__init__-178"><a href="#ScrapboxClient.__init__-178"><span class="linenos">178</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">pat</span> <span class="o">=</span> <span class="n">pat</span>
+</span><span id="ScrapboxClient.__init__-179"><a href="#ScrapboxClient.__init__-179"><span class="linenos">179</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">service_account_key</span> <span class="o">=</span> <span class="kc">None</span> <span class="k">if</span> <span class="n">pat</span> <span class="k">else</span> <span class="n">service_account_key</span>
+</span><span id="ScrapboxClient.__init__-180"><a href="#ScrapboxClient.__init__-180"><span class="linenos">180</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">connect_sid</span> <span class="o">=</span> <span class="kc">None</span> <span class="k">if</span> <span class="n">pat</span> <span class="ow">or</span> <span class="n">service_account_key</span> <span class="k">else</span> <span class="n">connect_sid</span>
+</span><span id="ScrapboxClient.__init__-181"><a href="#ScrapboxClient.__init__-181"><span class="linenos">181</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">client</span> <span class="o">=</span> <span class="n">httpx</span><span class="o">.</span><span class="n">Client</span><span class="p">(</span>
+</span><span id="ScrapboxClient.__init__-182"><a href="#ScrapboxClient.__init__-182"><span class="linenos">182</span></a>            <span class="n">cookies</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;connect.sid&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">connect_sid</span><span class="p">}</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">connect_sid</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="ScrapboxClient.__init__-183"><a href="#ScrapboxClient.__init__-183"><span class="linenos">183</span></a>            <span class="n">follow_redirects</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="ScrapboxClient.__init__-184"><a href="#ScrapboxClient.__init__-184"><span class="linenos">184</span></a>            <span class="n">transport</span><span class="o">=</span><span class="n">transport</span><span class="p">,</span>
+</span><span id="ScrapboxClient.__init__-185"><a href="#ScrapboxClient.__init__-185"><span class="linenos">185</span></a>        <span class="p">)</span>
+</span><span id="ScrapboxClient.__init__-186"><a href="#ScrapboxClient.__init__-186"><span class="linenos">186</span></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">pat</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">service_account_key</span><span class="p">:</span>
+</span><span id="ScrapboxClient.__init__-187"><a href="#ScrapboxClient.__init__-187"><span class="linenos">187</span></a>            <span class="c1"># Attach the credential per request instead of as a default header:</span>
+</span><span id="ScrapboxClient.__init__-188"><a href="#ScrapboxClient.__init__-188"><span class="linenos">188</span></a>            <span class="c1"># get_file() follows redirects to third-party hosts (Gyazo), which must</span>
+</span><span id="ScrapboxClient.__init__-189"><a href="#ScrapboxClient.__init__-189"><span class="linenos">189</span></a>            <span class="c1"># not receive it.</span>
+</span><span id="ScrapboxClient.__init__-190"><a href="#ScrapboxClient.__init__-190"><span class="linenos">190</span></a>            <span class="bp">self</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">event_hooks</span><span class="p">[</span><span class="s2">&quot;request&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_attach_credential</span><span class="p">)</span>
 </span></pre></div>
 
 
@@ -4366,9 +4422,9 @@ is still exercised.</li>
 
     </div>
     <a class="headerlink" href="#ScrapboxClient.close"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="ScrapboxClient.close-188"><a href="#ScrapboxClient.close-188"><span class="linenos">188</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">close</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="ScrapboxClient.close-189"><a href="#ScrapboxClient.close-189"><span class="linenos">189</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Close the HTTP client.&quot;&quot;&quot;</span>
-</span><span id="ScrapboxClient.close-190"><a href="#ScrapboxClient.close-190"><span class="linenos">190</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="ScrapboxClient.close-213"><a href="#ScrapboxClient.close-213"><span class="linenos">213</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">close</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="ScrapboxClient.close-214"><a href="#ScrapboxClient.close-214"><span class="linenos">214</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Close the HTTP client.&quot;&quot;&quot;</span>
+</span><span id="ScrapboxClient.close-215"><a href="#ScrapboxClient.close-215"><span class="linenos">215</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
 </span></pre></div>
 
 

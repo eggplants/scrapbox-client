@@ -152,6 +152,21 @@ Service Account 自身の id になる。
 
 Service Account によるアクセスはプロジェクトの IP アドレス制限を受けない。
 
+### 資格情報が生きているかの確認
+
+`sbc info` は 3 種類の資格情報それぞれを、他を混ぜずに 1 つずつ送って確かめる。
+
+| 資格情報 | 叩くエンドポイント | 判定 |
+| --- | --- | --- |
+| `connect.sid` | `GET /api/users/me` | `id` があれば有効。`{"isGuest": true}` は失効 |
+| PAT | `GET /api/users/me` | 同上。無効なトークンは 401 `InvalidPersonalAccessTokenError` |
+| Service Account Access Key | `GET /api/projects/:project/users` | 200 なら有効 |
+
+Service Account Access Key だけは、キーが属するプロジェクトを `--project` で渡さないと判定できない。
+属さないプロジェクトは 400 `Service account is not available for this project.` を返すが、
+**存在しないでたらめなキーでも同じ 400 が返る**ため、この応答からはキーの生死が分からない。
+`sbc info` はこの場合を `invalid` ではなく `unknown` として報告する。
+
 ## エンドポイント一覧
 
 | メソッド | パス | クライアントメソッド | CLI |
@@ -166,10 +181,10 @@ Service Account によるアクセスはプロジェクトの IP アドレス制
 | GET | `/api/pages/:project/search/query` | `search_pages` | `search` |
 | GET | `/api/pages/:project/search/vector/titles` | `search_titles_by_vector` | `vector-search` |
 | GET | `/api/commits/:project/:pageId` | `get_commits` | `commits` |
-| GET | `/api/projects/:project/users` | `get_project_users` | `members` |
+| GET | `/api/projects/:project/users` | `get_project_users` | `members`, `info --project` |
 | GET | `/api/projects/:project` | `get_project` | `project` |
 | GET | `/api/projects` | `get_projects` | `projects` |
-| GET | `/api/users/me` | `get_me` | `whoami` |
+| GET | `/api/users/me` | `get_me` | `whoami`, `info` |
 | GET | `/api/gcs/:fileId/info` | `get_file_info` | `file-info` |
 | GET | `/api/oembed-proxy/gyazo` | `get_file`（Gyazo URL のとき） | `file` |
 | POST | `/api/pages/v2/:project/page-edit-for-ai/preview` | `preview_page_edit` | `edit-preview` |
