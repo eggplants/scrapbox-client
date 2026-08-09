@@ -232,6 +232,15 @@ wheels = [
 ]
 
 [[package]]
+name = "openapi-generator-cli"
+version = "7.24.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/7b/88/a8aeda38d664b7fcacf94f8c26c32b439619c50165e7893e1d7e836a2d70/openapi_generator_cli-7.24.0.tar.gz", hash = "sha256:89493ecf8d8f736b9d137991a8c8d81282fb2fd84cceff1d0975ee477db24bb4", size = 28579058, upload-time = "2026-07-21T02:45:15.525Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cf/c0/8273992c601b2595d54f34315c1a01e4e1b9623575c025499648aedbb44e/openapi_generator_cli-7.24.0-py3-none-any.whl", hash = "sha256:5aa997a45b571afd2d5e3a4553e1fa54cb7beb38c0ad37439f25ddc8a0a4313f", size = 28593838, upload-time = "2026-07-21T02:45:11.308Z" },
+]
+
+[[package]]
 name = "packaging"
 version = "26.2"
 source = { registry = "https://pypi.org/simple" }
@@ -508,6 +517,7 @@ dev = [
     { name = "pytest-cov" },
 ]
 docs = [
+    { name = "openapi-generator-cli" },
     { name = "pdoc" },
 ]
 

@@ -1,6 +1,7 @@
 [tools]
 "aqua:azu/dockerfile-pin" = "latest"
 claude = "latest"
+java = "temurin-21"
 pinact = "latest"
 python = "latest"
 uv = "latest"
@@ -33,9 +34,22 @@ uv run pytest --junitxml=pytest.xml --cov-report=term-missing:skip-covered --cov
 description = "Build"
 run = "uv build"
 
+[tasks.docs-pdoc]
+description = "Generate API reference for the Python package"
+run = "uv run pdoc scrapbox -o ./docs --docformat google"
+
+[tasks.docs-openapi]
+description = "Generate HTTP API documentation from the OpenAPI spec"
+run = """
+#!/usr/bin/env bash
+set -euxo pipefail
+uv run openapi-generator-cli generate -i docs/openapi.yaml -g html2 -o docs/api
+rm -rf docs/api/.openapi-generator docs/api/.openapi-generator-ignore
+"""
+
 [tasks.docs]
 description = "Generate documentation"
-run = "uv run pdoc scrapbox -o ./docs --docformat google"
+depends = ["docs-pdoc", "docs-openapi"]
 
 [tasks.pyproject-fmt]
 description = "Run pyproject-fmt"

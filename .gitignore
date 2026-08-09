@@ -14,5 +14,7 @@ pytest.xml
 # Virtual environments
 .venv
 
-# Documentation
-docs/
+# Documentation (generated output; the spec sources below are tracked)
+docs/*
+!docs/openapi.yaml
+!docs/cosense-api.md

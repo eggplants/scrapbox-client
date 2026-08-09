@@ -14,6 +14,12 @@
 
 English version: [README.md](README.md)
 
+## ドキュメント
+
+- `scrapbox-client` Python API ドキュメント: <https://egpl.dev/scrapbox-client/scrapbox.html>
+- Cosense HTTP API 非公式ドキュメント: <https://egpl.dev/scrapbox-client/api/>
+- Cosense HTTP API 非公式 OpenAPI Spec: <https://egpl.dev/scrapbox-client/openapi.yaml>
+
 ## インストール
 
 ```bash
@@ -145,6 +151,84 @@ $ sbc login
 Enter connect.sid, personal access token or service account access key:
 Saved to /home/you/.config/sbc/connect.sid
 ```
+
+### ページの作成と編集(PAT / Service Account Access Key限定)
+
+`sbc edit-preview` で変更を試し、返ってきた `previewId` を `sbc edit-submit` に渡して確定する。
+preview は何も書き込まない試行で、数分で失効し、submit できるのは 1 回だけである。
+
+変更内容は `ops` キーを持つ JSON で渡す。標準入力か `--input-file` のどちらでもよい。
+`lineId` は `sbc page-v2 <project> <title> --json` の `lines[].id` で調べる。
+
+| op | 意味 |
+| --- | --- |
+| `{"insertBefore": "<lineId>" \| "_end", "text": "..."}` | 行の挿入。`_end` はページ末尾。改行を含むテキストは複数行に分割される |
+| `{"replace": "<lineId>", "text": "..."}` | 行の置換。複数行のテキストは拒否される |
+| `{"delete": "<lineId>"}` | 行の削除 |
+
+#### 作成
+
+`--page-id` を省くと新規作成になる。1 行目のテキストがページタイトルとなる。
+
+`status` が `create` なら新規作成、`update` なら既存ページの更新である。
+
+`>` の付いた行が今回挿入される行で、右の ID はクライアントが生成した行 ID である。
+新規作成では、**1 行目の行 ID がそのままページ ID になる**。
+
+同名のページが既にあると、submit を待たずこの時点でタイトルに `_2` が付き、1 行目のテキストも書き換わる。
+
+```shellsession
+$ echo '{"ops":[{"insertBefore":"_end","text":"シンプルな新規ページ"}]}' \
+    | sbc edit-preview my-project
+previewId: 6a784f6497b7c9f8474230ea
+expireAt:  2026-08-09T10:04:00.687Z
+status:    create
+title:     シンプルな新規ページ
+
+page (after apply):
+> シンプルな新規ページ    # 1f777fb354af9527c1583d2e
+
+$ sbc edit-submit my-project 6a784f6497b7c9f8474230ea
+commitId: 6a7847a7021948351af3e9ed
+pageId:   1f777fb354af9527c1583d2e
+title:    シンプルな新規ページ
+url:      https://scrapbox.io/my-project/シンプルな新規ページ
+```
+
+#### 編集
+
+`--page-id` に対象ページの ID を渡す。`ops` は配列順に適用される。
+anchor に指定した行 ID は、その op を適用する時点で存在していなければならない。
+
+```shellsession
+$ cat edit.json
+{
+  "ops": [
+    {"replace": "6a78194f00000000007455fe", "text": "書き換えた行"},
+    {"insertBefore": "_end", "text": "末尾に足した行"}
+  ]
+}
+
+$ sbc edit-preview my-project --page-id 6a78192b3a6ddc39bdf42b47 --input-file edit.json
+previewId: 6a7850835d9cbe48c6602555
+expireAt:  2026-08-09T10:08:47.865Z
+status:    update
+title:     test
+
+page (after apply):
+  test
+  書き換えた行
+  [https://scrapbox.io/files/6a781e51d393133856f18a12.png]
+
+
+> 末尾に足した行   # 26a76acbe1093acdc2c1ca37
+```
+
+#### 削除
+
+ページの削除はブラウザの UI から行う。
+
+参照: <https://helpfeel.com/help/--67e0bedcc6d6e5bea3a235b8>
 
 ## ライブラリ
 

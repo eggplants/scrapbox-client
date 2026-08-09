@@ -39,6 +39,7 @@ dev = [
   "pytest-cov>=7",
 ]
 docs = [
+  "openapi-generator-cli>=7.24",
   "pdoc>=16",
 ]
 
