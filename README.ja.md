@@ -23,6 +23,13 @@ English version: [README.md](README.md)
 ## インストール
 
 ```bash
+# mise
+mise use -g pipx:scrapbox-client
+
+# pipx
+pipx install scrapbox-client
+
+# pip
 pip install scrapbox-client
 ```
 

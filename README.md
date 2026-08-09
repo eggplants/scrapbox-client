@@ -23,6 +23,13 @@ A client for [Scrapbox (Helpfeel Cosense)](https://scrapbox.io/product)
 ## Install
 
 ```bash
+# mise
+mise use -g pipx:scrapbox-client
+
+# pipx
+pipx install scrapbox-client
+
+# pip
 pip install scrapbox-client
 ```
 
