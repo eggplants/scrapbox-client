@@ -1,6 +1,7 @@
 """CLI for Scrapbox client."""
 
 import argparse
+import getpass
 import os
 import sys
 from pathlib import Path
@@ -9,6 +10,18 @@ from textwrap import dedent
 from . import __version__
 from .client import ScrapboxClient
 from .models import PageListResponse
+
+CONNECT_SID_FILE_NAME = "connect.sid"
+"""File name of the saved connect.sid, under the config directory."""
+
+PAT_FILE_NAME = "pat"
+"""File name of the saved personal access token, under the config directory."""
+
+CONNECT_SID_PREFIX = "s%"
+"""Prefix identifying a connect.sid cookie value."""
+
+PAT_PREFIX = "pat_"
+"""Prefix identifying a personal access token."""
 
 
 class ScrapboxCliArgs(argparse.Namespace):
@@ -25,6 +38,8 @@ class ScrapboxCliArgs(argparse.Namespace):
     output: str | None = None
     connect_sid: str | None = None
     connect_sid_file: str | None = None
+    pat: str | None = None
+    pat_file: str | None = None
 
 
 def check_output_path(path_str: str) -> str:
@@ -67,12 +82,24 @@ def create_parser() -> argparse.ArgumentParser:
               sbc text my-project "Page Title"
               sbc icon my-project "Page Title"
               sbc file 60190edf1176d9001c13f8e8.png --output image.png
+              echo "pat_xxxxxxxx" | sbc login
+
+            `sbc login` saves the credential read from stdin, choosing the file by
+            its prefix: `s%` for ~/.config/sbc/connect.sid, `pat_` for ~/.config/sbc/pat
 
             priority of `connect.sid` source:
               1. --connect-sid argument
               2. --connect-sid-file argument
               3. ~/.config/sbc/connect.sid file
               4. SBC_CONNECT_SID environment variable
+
+            priority of personal access token source:
+              1. --pat argument
+              2. --pat-file argument
+              3. ~/.config/sbc/pat file
+              4. SBC_PAT environment variable
+
+            a personal access token takes precedence over `connect.sid`
             """
         ),
     )
@@ -94,6 +121,18 @@ def create_parser() -> argparse.ArgumentParser:
     auth_group.add_argument(
         "--connect-sid-file",
         help="Path to file containing connect.sid (default: ~/.config/sbc/connect.sid)",
+        default=None,
+    )
+
+    pat_group = parser.add_mutually_exclusive_group()
+    pat_group.add_argument(
+        "--pat",
+        help="Scrapbox personal access token (takes precedence over connect.sid)",
+        default=None,
+    )
+    pat_group.add_argument(
+        "--pat-file",
+        help="Path to file containing a personal access token (default: ~/.config/sbc/pat)",
         default=None,
     )
 
@@ -140,6 +179,10 @@ def create_parser() -> argparse.ArgumentParser:
     file_parser.add_argument("file_id", help="File ID or full URL")
     file_parser.add_argument("--output", "-o", required=True, type=check_output_path, help="Output file path")
     file_parser.set_defaults(handler=cmd_file)
+
+    # login command
+    login_parser = subparsers.add_parser("login", help="Save a credential read from stdin")
+    login_parser.set_defaults(handler=cmd_login)
 
     return parser
 
@@ -341,6 +384,116 @@ def cmd_file(client: ScrapboxClient, args: ScrapboxCliArgs) -> int:
     return 0
 
 
+def get_config_dir() -> Path:
+    """Get the directory where credentials are stored.
+
+    Returns:
+        The ~/.config/sbc directory path.
+    """
+    return Path.home() / ".config" / "sbc"
+
+
+def read_credential_from_stdin() -> str:
+    """Read a credential from stdin, without echoing it back on a terminal.
+
+    Returns:
+        The credential string, stripped of surrounding whitespace.
+    """
+    if sys.stdin.isatty():
+        return getpass.getpass("Enter connect.sid or personal access token: ").strip()
+    return sys.stdin.read().strip()
+
+
+def save_credential(credential: str) -> Path:
+    """Save a credential to the file matching its type.
+
+    The credential type is detected from its prefix: `s%` for a connect.sid
+    cookie, `pat_` for a personal access token.
+
+    Args:
+        credential: The credential to save.
+
+    Returns:
+        The path the credential was written to.
+
+    Raises:
+        ValueError: If the credential is empty or of an unknown type.
+    """
+    if not credential:
+        msg = "No credential given."
+        raise ValueError(msg)
+    if len(credential.split()) > 1:
+        msg = "Credential must be a single line without whitespace."
+        raise ValueError(msg)
+
+    if credential.startswith(CONNECT_SID_PREFIX):
+        file_name = CONNECT_SID_FILE_NAME
+    elif credential.startswith(PAT_PREFIX):
+        file_name = PAT_FILE_NAME
+    else:
+        msg = (
+            f"Unknown credential type: expected a connect.sid starting with "
+            f"'{CONNECT_SID_PREFIX}' or a personal access token starting with '{PAT_PREFIX}'."
+        )
+        raise ValueError(msg)
+
+    config_dir = get_config_dir()
+    config_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    credential_file = config_dir / file_name
+    credential_file.touch(mode=0o600, exist_ok=True)
+    credential_file.chmod(0o600)
+    credential_file.write_text(f"{credential}\n")
+    return credential_file
+
+
+def cmd_login() -> int:
+    """Execute login command.
+
+    Unlike the other commands, this one takes no client: it only writes to the
+    config directory.
+
+    Returns:
+        Exit code.
+    """
+    try:
+        credential_file = save_credential(read_credential_from_stdin())
+    except (ValueError, OSError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    print(f"Saved to {credential_file}", file=sys.stderr)
+    return 0
+
+
+def get_credential(value: str | None, file_path: str | None, default_file_name: str, env_var: str) -> str | None:
+    """Get a credential from arguments, a default file, or the environment.
+
+    Args:
+        value: Credential passed directly as an argument.
+        file_path: Path to a file containing the credential.
+        default_file_name: File name looked up under ~/.config/sbc/.
+        env_var: Name of the environment variable to fall back to.
+
+    Returns:
+        The credential string or None if not found.
+    """
+    if value:
+        return value
+
+    if file_path:
+        credential_file = Path(file_path)
+        if credential_file.exists():
+            return credential_file.read_text().strip()
+
+    default_file = get_config_dir() / default_file_name
+    if default_file.exists():
+        return default_file.read_text().strip()
+
+    if env_var in os.environ:
+        return os.environ[env_var]
+
+    return None
+
+
 def get_connect_sid(args: ScrapboxCliArgs) -> str | None:
     """Get connect.sid from arguments or default location.
 
@@ -350,22 +503,19 @@ def get_connect_sid(args: ScrapboxCliArgs) -> str | None:
     Returns:
         The connect.sid string or None if not found.
     """
-    if args.connect_sid:
-        return args.connect_sid
+    return get_credential(args.connect_sid, args.connect_sid_file, CONNECT_SID_FILE_NAME, "SBC_CONNECT_SID")
 
-    if args.connect_sid_file:
-        sid_file = Path(args.connect_sid_file)
-        if sid_file.exists():
-            return sid_file.read_text().strip()
 
-    default_sid_file = Path.home() / ".config" / "sbc" / "connect.sid"
-    if default_sid_file.exists():
-        return default_sid_file.read_text().strip()
+def get_pat(args: ScrapboxCliArgs) -> str | None:
+    """Get the personal access token from arguments or default location.
 
-    if "SBC_CONNECT_SID" in os.environ:
-        return os.environ["SBC_CONNECT_SID"]
+    Args:
+        args: Parsed command-line arguments.
 
-    return None
+    Returns:
+        The personal access token string or None if not found.
+    """
+    return get_credential(args.pat, args.pat_file, PAT_FILE_NAME, "SBC_PAT")
 
 
 def main(*, test_args: list[str] | None = None) -> int:
@@ -385,7 +535,10 @@ def main(*, test_args: list[str] | None = None) -> int:
         parser.print_help()
         return 1
 
-    with ScrapboxClient(connect_sid=get_connect_sid(args)) as client:
+    if args.handler is cmd_login:
+        return cmd_login()
+
+    with ScrapboxClient(connect_sid=get_connect_sid(args), pat=get_pat(args)) as client:
         return args.handler(client, args)
 
     return 0

@@ -22,12 +22,12 @@ pip install scrapbox-client
 
 ```shellsession
 $ sbc
-usage: sbc [-h] [--version] [--connect-sid CONNECT_SID | --connect-sid-file CONNECT_SID_FILE] {pages,all-pages,page,text,icon,file} ...
+usage: sbc [-h] [--version] [--connect-sid CONNECT_SID | --connect-sid-file CONNECT_SID_FILE] [--pat PAT | --pat-file PAT_FILE] {pages,all-pages,page,text,icon,file,login} ...
 
 Scrapbox API client CLI
 
 positional arguments:
-  {pages,all-pages,page,text,icon,file}
+  {pages,all-pages,page,text,icon,file,login}
                         Available commands
     pages               Get page list from a project
     all-pages           Get all pages from a project
@@ -35,6 +35,7 @@ positional arguments:
     text                Get text content of a page
     icon                Get icon URL for a page
     file                Download a file from Scrapbox
+    login               Save a credential read from stdin
 
 options:
   -h, --help            show this help message and exit
@@ -43,6 +44,8 @@ options:
                         Scrapbox authentication cookie (connect.sid)
   --connect-sid-file CONNECT_SID_FILE
                         Path to file containing connect.sid (default: ~/.config/sbc/connect.sid)
+  --pat PAT             Scrapbox personal access token (takes precedence over connect.sid)
+  --pat-file PAT_FILE   Path to file containing a personal access token (default: ~/.config/sbc/pat)
 
 examples:
   sbc pages my-project --limit 10 --skip 10 --json
@@ -51,13 +54,48 @@ examples:
   sbc text my-project "Page Title"
   sbc icon my-project "Page Title"
   sbc file 60190edf1176d9001c13f8e8.png --output image.png
+  echo "pat_xxxxxxxx" | sbc login
+
+`sbc login` saves the credential read from stdin, choosing the file by
+its prefix: `s%` for ~/.config/sbc/connect.sid, `pat_` for ~/.config/sbc/pat
 
 priority of `connect.sid` source:
   1. --connect-sid argument
   2. --connect-sid-file argument
   3. ~/.config/sbc/connect.sid file
   4. SBC_CONNECT_SID environment variable
+
+priority of personal access token source:
+  1. --pat argument
+  2. --pat-file argument
+  3. ~/.config/sbc/pat file
+  4. SBC_PAT environment variable
+
+a personal access token takes precedence over `connect.sid`
 ```
+
+### Saving a credential
+
+`sbc login` reads one credential from stdin and stores it under `~/.config/sbc/`,
+where the other commands pick it up. The destination is chosen from the prefix of
+the value, so no flag is needed to say which kind it is:
+
+| Input prefix | Credential | Saved to |
+| --- | --- | --- |
+| `s%` | `connect.sid` cookie | `~/.config/sbc/connect.sid` |
+| `pat_` | personal access token | `~/.config/sbc/pat` |
+
+```shellsession
+$ echo "pat_xxxxxxxx" | sbc login
+Saved to /home/you/.config/sbc/pat
+
+$ sbc login
+Enter connect.sid or personal access token:
+Saved to /home/you/.config/sbc/connect.sid
+```
+
+Anything else is rejected with a non-zero exit code. On a terminal the value is
+prompted for without echo; credential files are written with `0600` permissions.
 
 ## Library
 
@@ -113,10 +151,10 @@ print()
 print()
 
 # Access private project with authentication
-# connect.sid is obtained from browser cookies
+# A personal access token is issued from the Cosense settings page
 print("=== Example with authentication ===")
-connect_sid = "s%3AykQ__xxxxx-.xxxxxxxxxxxxxxxxxxxxx%2Bxxxxxxxxx%2Bxxxxxxxxxxx"
-with ScrapboxClient(connect_sid=connect_sid) as client:
+pat = "pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+with ScrapboxClient(pat=pat) as client:
     try:
         pages = client.get_pages("your-private-pj", limit=3)
         print(f"Project: {pages.project_name}")
@@ -125,6 +163,28 @@ with ScrapboxClient(connect_sid=connect_sid) as client:
     except Exception as e:
         print(f"Error: {e}")
 ```
+
+### Authentication
+
+A private project can be accessed with either a personal access token
+or a `connect.sid` cookie:
+
+```python
+from scrapbox.client import ScrapboxClient
+
+# Recommended: personal access token, issued from the Cosense settings page
+with ScrapboxClient(pat="pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx") as client:
+    pages = client.get_pages("your-private-pj", limit=3)
+
+# connect.sid cookie, obtained from browser cookies
+with ScrapboxClient(connect_sid="s%3AykQ__xxxxx-.xxxxx") as client:
+    pages = client.get_pages("your-private-pj", limit=3)
+```
+
+The token is sent as the `x-personal-access-token` header, and only to
+`scrapbox.io`, so it is not forwarded to the image hosts that `get_file()`
+follows redirects to. When both credentials are given, the token takes
+precedence and the cookie is not sent.
 
 ### Image
 

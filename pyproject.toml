@@ -42,22 +42,18 @@ docs = [
   "pdoc>=16",
 ]
 
-[tool.hatch.version]
-source = "uv-dynamic-versioning"
-
-[tool.hatch.build.targets.sdist]
-include = [ "scrapbox" ]
-
-[tool.hatch.build.targets.wheel]
-include = [ "scrapbox" ]
+[tool.hatch]
+version.source = "uv-dynamic-versioning"
+build.targets.wheel.include = [ "scrapbox" ]
+build.targets.sdist.include = [ "scrapbox" ]
 
 [tool.uv]
-preview = true
 default-groups = [
   "dev",
   "docs",
 ]
 exclude-newer = "P7D"
+preview = true
 
 [tool.ruff]
 line-length = 120

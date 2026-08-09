@@ -1,8 +1,13 @@
 """Tests for Scrapbox client."""
 
+from typing import TYPE_CHECKING
+
 import pytest
 
-from scrapbox.client import ScrapboxClient
+from scrapbox.client import PAT_HEADER, ScrapboxClient
+
+if TYPE_CHECKING:
+    import httpx
 
 
 class TestScrapboxClient:
@@ -146,3 +151,52 @@ class TestScrapboxClient:
 
         with ScrapboxClient() as client, pytest.raises(Exception):  # noqa: B017, PT011
             client.get_pages(invalid_project)
+
+
+class TestAuthentication:
+    """Test how credentials are attached to outgoing requests."""
+
+    API_URL = "https://scrapbox.io/api/pages/help-jp"
+    GYAZO_URL = "https://i.gyazo.com/1a2b3c4d5e6f7g8h9i0j.png"
+
+    @staticmethod
+    def _build_request(client: ScrapboxClient, url: str) -> httpx.Request:
+        """Build a request through the client so its hooks and cookies apply."""
+        request = client.client.build_request("GET", url)
+        for hook in client.client.event_hooks["request"]:
+            hook(request)
+        return request
+
+    def test_no_credentials(self) -> None:
+        """Test that no credential is attached when none is given."""
+        with ScrapboxClient() as client:
+            request = self._build_request(client, self.API_URL)
+            assert PAT_HEADER not in request.headers
+            assert "cookie" not in request.headers
+
+    def test_connect_sid_is_sent_as_cookie(self) -> None:
+        """Test that connect.sid is sent as a cookie."""
+        with ScrapboxClient(connect_sid="test-sid") as client:
+            request = self._build_request(client, self.API_URL)
+            assert PAT_HEADER not in request.headers
+            assert "connect.sid=test-sid" in request.headers["cookie"]
+
+    def test_pat_is_sent_as_header(self) -> None:
+        """Test that the personal access token is sent as a header."""
+        with ScrapboxClient(pat="test-pat") as client:
+            request = self._build_request(client, self.API_URL)
+            assert request.headers[PAT_HEADER] == "test-pat"
+
+    def test_pat_takes_precedence_over_connect_sid(self) -> None:
+        """Test that the cookie is dropped when a personal access token is given."""
+        with ScrapboxClient(connect_sid="test-sid", pat="test-pat") as client:
+            assert client.connect_sid is None
+            request = self._build_request(client, self.API_URL)
+            assert request.headers[PAT_HEADER] == "test-pat"
+            assert "cookie" not in request.headers
+
+    def test_pat_is_not_sent_to_other_hosts(self) -> None:
+        """Test that the personal access token is not leaked to third-party hosts."""
+        with ScrapboxClient(pat="test-pat") as client:
+            request = self._build_request(client, self.GYAZO_URL)
+            assert PAT_HEADER not in request.headers

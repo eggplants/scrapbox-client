@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import io
+import stat
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from scrapbox.main import check_output_path, get_connect_sid, main
+from scrapbox.main import check_output_path, get_connect_sid, get_pat, main, save_credential
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -349,10 +351,72 @@ class TestGetConnectSid:
         assert result is None
 
 
+class TestGetPat:
+    """Test get_pat function."""
+
+    def test_from_argument(self) -> None:
+        """Test getting the personal access token from argument."""
+        args = MagicMock()
+        args.pat = "arg-value"
+        args.pat_file = None
+        result = get_pat(args)
+        assert result == "arg-value"
+
+    def test_from_file(self, tmp_path: Path) -> None:
+        """Test getting the personal access token from specified file."""
+        pat_file = tmp_path / "test.pat"
+        pat_file.write_text("file-value\n")
+        args = MagicMock()
+        args.pat = None
+        args.pat_file = str(pat_file)
+        result = get_pat(args)
+        assert result == "file-value"
+
+    def test_from_default_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test getting the personal access token from default file."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        config_dir = tmp_path / ".config" / "sbc"
+        config_dir.mkdir(parents=True)
+        (config_dir / "pat").write_text("default-value\n")
+
+        args = MagicMock()
+        args.pat = None
+        args.pat_file = None
+        result = get_pat(args)
+        assert result == "default-value"
+
+    def test_from_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test getting the personal access token from the environment."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        monkeypatch.setenv("SBC_PAT", "env-value")
+        args = MagicMock()
+        args.pat = None
+        args.pat_file = None
+        result = get_pat(args)
+        assert result == "env-value"
+
+    def test_none_when_no_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test returning None when no file exists."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        monkeypatch.delenv("SBC_PAT", raising=False)
+        args = MagicMock()
+        args.pat = None
+        args.pat_file = None
+        result = get_pat(args)
+        assert result is None
+
+
 class TestConnectSidPriority:
     """Test connect.sid priority logic."""
 
     PROJECT_NAME = "help-jp"
+
+    @pytest.fixture(autouse=True)
+    def _isolate_credentials(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Keep ambient credential files and environment variables out of these tests."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        monkeypatch.delenv("SBC_CONNECT_SID", raising=False)
+        monkeypatch.delenv("SBC_PAT", raising=False)
 
     def test_connect_sid_from_argument(self, tmp_path: Path) -> None:
         """Test that --connect-sid argument takes priority."""
@@ -372,7 +436,7 @@ class TestConnectSidPriority:
 
             main(test_args=["--connect-sid", "arg-sid-value", "pages", self.PROJECT_NAME])
 
-            mock_client.assert_called_once_with(connect_sid="arg-sid-value")
+            mock_client.assert_called_once_with(connect_sid="arg-sid-value", pat=None)
 
     def test_connect_sid_from_file(self, tmp_path: Path) -> None:
         """Test that --connect-sid-file is used when --connect-sid is not provided."""
@@ -392,7 +456,7 @@ class TestConnectSidPriority:
 
             main(test_args=["--connect-sid-file", str(sid_file), "pages", self.PROJECT_NAME])
 
-            mock_client.assert_called_once_with(connect_sid="file-sid-value")
+            mock_client.assert_called_once_with(connect_sid="file-sid-value", pat=None)
 
     def test_connect_sid_from_default_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that default ~/.config/sbc/connect.sid is used when no arguments provided."""
@@ -416,7 +480,7 @@ class TestConnectSidPriority:
 
             main(test_args=["pages", self.PROJECT_NAME])
 
-            mock_client.assert_called_once_with(connect_sid="default-sid-value")
+            mock_client.assert_called_once_with(connect_sid="default-sid-value", pat=None)
 
     def test_connect_sid_none_when_no_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that connect_sid is None when no file exists."""
@@ -435,7 +499,7 @@ class TestConnectSidPriority:
 
             main(test_args=["pages", self.PROJECT_NAME])
 
-            mock_client.assert_called_once_with(connect_sid=None)
+            mock_client.assert_called_once_with(connect_sid=None, pat=None)
 
     def test_connect_sid_file_not_exists(self, tmp_path: Path) -> None:
         """Test that connect_sid is None when specified file doesn't exist."""
@@ -454,7 +518,7 @@ class TestConnectSidPriority:
 
             main(test_args=["--connect-sid-file", str(non_existent_file), "pages", self.PROJECT_NAME])
 
-            mock_client.assert_called_once_with(connect_sid=None)
+            mock_client.assert_called_once_with(connect_sid=None, pat=None)
 
     def test_connect_sid_argument_priority_over_file(self) -> None:
         """Test that --connect-sid has priority over --connect-sid-file."""
@@ -462,3 +526,178 @@ class TestConnectSidPriority:
             main(
                 test_args=["--connect-sid", "arg-value", "--connect-sid-file", "file-path", "pages", self.PROJECT_NAME]
             )
+
+
+class TestPatPriority:
+    """Test personal access token priority logic."""
+
+    PROJECT_NAME = "help-jp"
+
+    @pytest.fixture(autouse=True)
+    def _isolate_credentials(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Keep ambient credential files and environment variables out of these tests."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        monkeypatch.delenv("SBC_CONNECT_SID", raising=False)
+        monkeypatch.delenv("SBC_PAT", raising=False)
+
+    def _mock_client(self) -> MagicMock:
+        """Build a patched ScrapboxClient returning an empty page list."""
+        mock_client = MagicMock()
+        mock_instance = MagicMock()
+        mock_client.return_value.__enter__.return_value = mock_instance
+        mock_instance.get_pages.return_value = MagicMock(
+            project_name=self.PROJECT_NAME,
+            count=0,
+            skip=0,
+            limit=100,
+            pages=[],
+        )
+        return mock_client
+
+    def test_pat_from_argument(self) -> None:
+        """Test that --pat is passed to the client."""
+        mock_client = self._mock_client()
+        with patch("scrapbox.main.ScrapboxClient", mock_client):
+            main(test_args=["--pat", "arg-pat-value", "pages", self.PROJECT_NAME])
+
+            mock_client.assert_called_once_with(connect_sid=None, pat="arg-pat-value")
+
+    def test_pat_from_file(self, tmp_path: Path) -> None:
+        """Test that --pat-file is used when --pat is not provided."""
+        pat_file = tmp_path / "test.pat"
+        pat_file.write_text("file-pat-value\n")
+
+        mock_client = self._mock_client()
+        with patch("scrapbox.main.ScrapboxClient", mock_client):
+            main(test_args=["--pat-file", str(pat_file), "pages", self.PROJECT_NAME])
+
+            mock_client.assert_called_once_with(connect_sid=None, pat="file-pat-value")
+
+    def test_pat_from_default_file(self, tmp_path: Path) -> None:
+        """Test that default ~/.config/sbc/pat is used when no arguments provided."""
+        config_dir = tmp_path / ".config" / "sbc"
+        config_dir.mkdir(parents=True)
+        (config_dir / "pat").write_text("default-pat-value\n")
+
+        mock_client = self._mock_client()
+        with patch("scrapbox.main.ScrapboxClient", mock_client):
+            main(test_args=["pages", self.PROJECT_NAME])
+
+            mock_client.assert_called_once_with(connect_sid=None, pat="default-pat-value")
+
+    def test_pat_and_connect_sid_are_both_passed(self) -> None:
+        """Test that both credentials reach the client, which resolves the precedence."""
+        mock_client = self._mock_client()
+        with patch("scrapbox.main.ScrapboxClient", mock_client):
+            main(test_args=["--connect-sid", "sid-value", "--pat", "pat-value", "pages", self.PROJECT_NAME])
+
+            mock_client.assert_called_once_with(connect_sid="sid-value", pat="pat-value")
+
+    def test_pat_argument_priority_over_file(self) -> None:
+        """Test that --pat and --pat-file are mutually exclusive."""
+        with pytest.raises(SystemExit):
+            main(test_args=["--pat", "arg-value", "--pat-file", "file-path", "pages", self.PROJECT_NAME])
+
+
+class TestLogin:
+    """Test the login command."""
+
+    OWNER_ONLY_MODE = 0o600
+
+    @pytest.fixture(autouse=True)
+    def _fake_home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Redirect the config directory into a temporary home."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+    @staticmethod
+    def _set_stdin(monkeypatch: pytest.MonkeyPatch, text: str) -> None:
+        """Feed text to stdin as a non-interactive stream."""
+        monkeypatch.setattr("sys.stdin", io.StringIO(text))
+
+    def test_save_pat(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that a pat_ credential is saved to the pat file."""
+        self._set_stdin(monkeypatch, "pat_abc123\n")
+        assert main(test_args=["login"]) == 0
+        assert (tmp_path / ".config" / "sbc" / "pat").read_text() == "pat_abc123\n"
+        assert not (tmp_path / ".config" / "sbc" / "connect.sid").exists()
+
+    def test_save_connect_sid(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that an s% credential is saved to the connect.sid file."""
+        self._set_stdin(monkeypatch, "s%3Aabc123\n")
+        assert main(test_args=["login"]) == 0
+        assert (tmp_path / ".config" / "sbc" / "connect.sid").read_text() == "s%3Aabc123\n"
+        assert not (tmp_path / ".config" / "sbc" / "pat").exists()
+
+    def test_saved_credential_is_read_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that a saved credential is picked up by the credential lookup."""
+        self._set_stdin(monkeypatch, "pat_abc123\n")
+        assert main(test_args=["login"]) == 0
+
+        monkeypatch.delenv("SBC_PAT", raising=False)
+        args = MagicMock()
+        args.pat = None
+        args.pat_file = None
+        assert get_pat(args) == "pat_abc123"
+
+    def test_credential_file_is_not_world_readable(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that the saved credential is only readable by its owner."""
+        self._set_stdin(monkeypatch, "pat_abc123\n")
+        assert main(test_args=["login"]) == 0
+
+        mode = (tmp_path / ".config" / "sbc" / "pat").stat().st_mode
+        assert stat.S_IMODE(mode) == self.OWNER_ONLY_MODE
+
+    def test_existing_credential_is_overwritten(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that logging in again replaces the stored credential."""
+        config_dir = tmp_path / ".config" / "sbc"
+        config_dir.mkdir(parents=True)
+        (config_dir / "pat").write_text("pat_old\n")
+
+        self._set_stdin(monkeypatch, "pat_new\n")
+        assert main(test_args=["login"]) == 0
+        assert (config_dir / "pat").read_text() == "pat_new\n"
+
+    def test_unknown_prefix_is_rejected(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that a credential with an unknown prefix is rejected."""
+        self._set_stdin(monkeypatch, "bogus-value\n")
+        assert main(test_args=["login"]) == 1
+        assert not (tmp_path / ".config" / "sbc").exists()
+
+    def test_empty_input_is_rejected(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that empty input is rejected."""
+        self._set_stdin(monkeypatch, "   \n")
+        assert main(test_args=["login"]) == 1
+        assert not (tmp_path / ".config" / "sbc").exists()
+
+    def test_multiline_input_is_rejected(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that input holding more than one value is rejected."""
+        self._set_stdin(monkeypatch, "pat_abc123\npat_def456\n")
+        assert main(test_args=["login"]) == 1
+        assert not (tmp_path / ".config" / "sbc").exists()
+
+    def test_prompts_without_echo_on_a_terminal(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that an interactive terminal is prompted via getpass."""
+        stdin = MagicMock()
+        stdin.isatty.return_value = True
+        monkeypatch.setattr("sys.stdin", stdin)
+        with patch("scrapbox.main.getpass.getpass", return_value="pat_abc123\n") as mock_getpass:
+            assert main(test_args=["login"]) == 0
+
+        mock_getpass.assert_called_once()
+        stdin.read.assert_not_called()
+        assert (tmp_path / ".config" / "sbc" / "pat").read_text() == "pat_abc123\n"
+
+    def test_login_does_not_build_a_client(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that login does not construct a ScrapboxClient."""
+        self._set_stdin(monkeypatch, "pat_abc123\n")
+        with patch("scrapbox.main.ScrapboxClient") as mock_client:
+            assert main(test_args=["login"]) == 0
+
+        mock_client.assert_not_called()
+
+    @pytest.mark.parametrize("credential", ["pat_abc123", "s%3Aabc123"])
+    def test_save_credential_returns_path(self, tmp_path: Path, credential: str) -> None:
+        """Test that save_credential returns the file it wrote to."""
+        path = save_credential(credential)
+        assert path.parent == tmp_path / ".config" / "sbc"
+        assert path.read_text() == f"{credential}\n"

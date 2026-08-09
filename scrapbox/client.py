@@ -10,6 +10,12 @@ from .models import GyazoOEmbedResponse, GyazoOEmbedResponsePhoto, PageDetail, P
 if TYPE_CHECKING:
     from types import TracebackType
 
+PAT_HEADER = "x-personal-access-token"
+"""Header carrying the personal access token."""
+
+SCRAPBOX_HOST = "scrapbox.io"
+"""Host the personal access token may be sent to."""
+
 
 class ScrapboxClient:
     """Scrapbox API client.
@@ -21,17 +27,36 @@ class ScrapboxClient:
     """Base URL for the Scrapbox API."""
     BASE_URL = "https://scrapbox.io/api"
 
-    def __init__(self, connect_sid: str | None = None) -> None:
+    def __init__(self, connect_sid: str | None = None, pat: str | None = None) -> None:
         """Initialize the Scrapbox API client.
+
+        Authentication is optional for public projects. When both credentials are
+        given, the personal access token is used and the cookie is not sent.
 
         Args:
             connect_sid: Scrapbox authentication cookie (connect.sid).
+            pat: Scrapbox personal access token, sent as the `x-personal-access-token`
+                header. Takes precedence over `connect_sid`.
         """
-        self.connect_sid = connect_sid
+        self.pat = pat
+        self.connect_sid = None if pat else connect_sid
         self.client = httpx.Client(
-            cookies={"connect.sid": connect_sid} if connect_sid else None,
+            cookies={"connect.sid": self.connect_sid} if self.connect_sid else None,
             follow_redirects=True,
         )
+        if pat:
+            # Attach the token per request instead of as a default header: get_file()
+            # follows redirects to third-party hosts (Gyazo), which must not receive it.
+            self.client.event_hooks["request"].append(self._attach_pat)
+
+    def _attach_pat(self, request: httpx.Request) -> None:
+        """Attach the personal access token to requests sent to Scrapbox.
+
+        Args:
+            request: The outgoing request.
+        """
+        if self.pat and request.url.host == SCRAPBOX_HOST:
+            request.headers[PAT_HEADER] = self.pat
 
     def __enter__(self: Self) -> Self:
         """Enter the runtime context related to this object."""
