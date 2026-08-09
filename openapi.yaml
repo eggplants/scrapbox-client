@@ -1,0 +1,2271 @@
+openapi: 3.1.0
+
+info:
+  title: Cosense (Scrapbox) HTTP API
+  version: "2026-08-09"
+  summary: Cosense HTTP APIの非公式API定義。
+  description: |
+    レスポンススキーマの `required` は、実測で必ず現れた field だけに絞ってある。
+    Cosense は「値が null」ではなく「key ごと落とす」ことがあり、たとえば実体の無いページ
+    (`persistent: false`) のレスポンスには `commitId` / `linesCount` / `charsCount` の key
+    自体が無い。
+    そのため optional と nullable を混ぜず、欠けうるものは `required` から外し、
+    null が来るものだけ `null` を型に含めている。
+  license:
+    name: MIT
+    url: https://github.com/eggplants/scrapbox-client/blob/master/LICENSE
+
+servers:
+  - url: https://scrapbox.io/api
+    description: |
+      個人プラン・ビジネスプランでのAPIサーバー。self-hosted origin (`SCRAPBOX_ORIGIN`) の場合は要変更。
+
+security:
+  # 公開プロジェクトの読み取りは無認証で通るので、空要素で「認証なし」も許す。
+  - {}
+  - PersonalAccessToken: []
+  - ServiceAccount: []
+  - SessionCookie: []
+
+tags:
+  - name: pages
+    description: ページの読み取り
+  - name: related
+    description: 関連ページ（1-hop / 2-hop）
+  - name: search
+    description: 全文検索とベクトル検索
+  - name: history
+    description: 編集履歴
+  - name: projects
+    description: プロジェクトとユーザー
+  - name: files
+    description: ファイル
+  - name: edit
+    description: ページ編集（PAT 必須）
+
+paths:
+  /pages/{projectName}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectName"
+    get:
+      tags: [pages]
+      operationId: getPages
+      summary: プロジェクトのページ一覧
+      description: |
+        本文 (`lines`) は含まれない。
+        末尾のスラッシュは付けても付けなくても 200 が返る。
+
+        `limit` の範囲外は API 側でエラーにならず、黙って別の値に置き換えられる。
+        1000 超は 1000 に、0 以下は既定の 100 になる。
+        返ってきた件数だけでは丸めか最終ページかを区別できないため、
+        このクライアントは範囲外を送らず `ValueError` にする (`check_page_size()`)。
+
+        `sort` に未知の値を送ってもエラーにはならず、既定の並びで 200 が返る。
+
+        固定ページ (`pin > 0`) は `sort` の指定によらず `pin` の降順で先頭に並ぶ。
+      parameters:
+        - name: skip
+          in: query
+          description: オフセット
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          description: |
+            1 リクエストで返る件数。
+            範囲外は API 側で丸められるため、このクライアントは 1〜1000 のみを送る。
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+        - name: sort
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [updated, created, accessed, linked, views, title]
+            default: updated
+        - name: filterType
+          in: query
+          description: |
+            クライアントは `icon` しか送らない。
+            `filterValue` と対で指定する。
+          required: false
+          schema:
+            type: string
+            enum: [icon]
+        - name: filterValue
+          in: query
+          description: |
+            絞り込み値。ログイン名 (`name`) であって表示名 (`displayName`) ではない。
+            本文中に `[<name>.icon]` を持つページと、そのユーザーが編集したページが返る。
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ページ一覧
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PageListResponse"
+        "401":
+          $ref: "#/components/responses/NotLoggedIn"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /pages/{projectName}/{encodedTitle}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectName"
+      - $ref: "#/components/parameters/EncodedTitle"
+    get:
+      tags: [pages]
+      operationId: getPage
+      summary: 単一ページ（v1）
+      description: |
+        本文とメタデータ。
+        v2 との違いは、関連ページ (`relatedPages`) を同梱する代わりに正規化 field
+        (`linksLc` / `iconsLc` / `projectLinksLc`) を持たないことだけである。
+
+        **存在しないページの扱いが二通りある。**
+
+        被リンクを持つページは実体が無くても 200 で返る。
+        その場合 `persistent` は false、`commitId` / `linesCount` / `charsCount` は
+        key ごと落ち、`id` と `lines[].id` にはリクエストのたびに変わる仮の値が入る。
+        この仮の ID は編集の anchor には使えない。
+
+        被リンクも無い完全な未作成ページは 404 になる。
+      responses:
+        "200":
+          description: ページ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PageDetail"
+        "401":
+          $ref: "#/components/responses/NotLoggedIn"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /pages/v2/{projectName}/{encodedTitle}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectName"
+      - $ref: "#/components/parameters/EncodedTitle"
+    get:
+      tags: [pages]
+      operationId: getPageV2
+      summary: 単一ページ（v2）
+      description: |
+        v1 と同じページ情報を、正規化 field 付きで返す。
+        `relatedPages` は返らないので、関連ページが要るなら
+        `links1hop` / `links2hop` を別に叩く。
+
+        編集 API のパスが `/pages/v2/...` 配下にあるため、編集の起点となる
+        `id` と `lines[].id` を取るならこちらを使うほうが一貫する。
+      responses:
+        "200":
+          description: ページ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PageDetailV2"
+        "401":
+          $ref: "#/components/responses/NotLoggedIn"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /pages/{projectName}/{encodedTitle}/text:
+    parameters:
+      - $ref: "#/components/parameters/ProjectName"
+      - $ref: "#/components/parameters/EncodedTitle"
+    get:
+      tags: [pages]
+      operationId: getPageText
+      summary: ページ本文のプレーンテキスト
+      description: |
+        `/api/` 配下で唯一 JSON を返さないエンドポイント。
+        1 行目はページタイトル、2 行目以降が本文になる。
+      responses:
+        "200":
+          description: 本文
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: |
+                ブラケティング
+                大事な言葉を[]で囲む書き方
+        "401":
+          $ref: "#/components/responses/NotLoggedIn"
+        "404":
+          description: |
+            ページが存在しない。
+            body は JSON だが、`message` の末尾の句点が v1 / v2 の同名エラーと違う。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                name: NotFoundError
+                message: Page not found.
+
+  /pages/{projectName}/{encodedTitle}/icon:
+    parameters:
+      - $ref: "#/components/parameters/ProjectName"
+      - $ref: "#/components/parameters/EncodedTitle"
+    get:
+      tags: [pages]
+      operationId: getPageIcon
+      summary: ページアイコンへのリダイレクト
+      description: |
+        画像そのものではなくリダイレクト先の URL が欲しいので、
+        `get_page_icon_url()` だけは `follow_redirects=False` で叩き `Location` を読む。
+
+        リダイレクト先はアイコンの実体によって変わる。
+
+        | アイコンの持ち方 | `Location` の例 |
+        | --- | --- |
+        | Gyazo 画像 | `https://gyazo.com/<hash>/max_size/400` |
+        | プロジェクトのアップロードファイル | `https://scrapbox.io/files/<fileId>.png?type=thumbnail&size=small` |
+      responses:
+        "302":
+          description: アイコン画像へのリダイレクト
+          headers:
+            Location:
+              required: true
+              schema:
+                type: string
+                format: uri
+              example: https://gyazo.com/2b10554d1274b76f058a11b69c6a88dd/max_size/400
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /pages/v2/{projectName}/{encodedTitle}/links1hop:
+    parameters:
+      - $ref: "#/components/parameters/ProjectName"
+      - $ref: "#/components/parameters/EncodedTitle"
+      - $ref: "#/components/parameters/RelatedSearch"
+      - $ref: "#/components/parameters/MatchAnyOp"
+      - $ref: "#/components/parameters/PerPage"
+      - $ref: "#/components/parameters/NextId"
+    get:
+      tags: [related]
+      operationId: getLinks1hop
+      summary: 1-hop の関連ページ
+      description: |
+        `perPage` と `nextId` で近傍を分割して取る。
+
+        - `perPage` の範囲外も API 側ではエラーにならない。1000 超は 1000 に、
+          `0` や数値でない値は既定の 1000 に、負数は 1 になる
+        - `nextId` はそのページの **最後の要素の `id`** で返る。そのまま送ると
+          その要素の次から返り、要素の重複は起きない
+        - 打ち切りの判定は `hasNext` で行う。`total` は近傍全体の件数で、
+          `search` で絞っても減らない
+
+        `search` を付けた場合、フィルタは **ページ単位で適用される**。
+        途中のページが空になったり `perPage` より少なくなったりする一方で、
+        カーソルはまだ先を指していることがある。
+        件数で打ち切らず `hasNext` だけを見る必要がある。
+      responses:
+        "200":
+          description: 近傍のページ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Links1hopResponse"
+        "401":
+          $ref: "#/components/responses/NotLoggedIn"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /pages/v2/{projectName}/{encodedTitle}/links2hop:
+    parameters:
+      - $ref: "#/components/parameters/ProjectName"
+      - $ref: "#/components/parameters/EncodedTitle"
+      - $ref: "#/components/parameters/RelatedSearch"
+      - $ref: "#/components/parameters/MatchAnyOp"
+      - $ref: "#/components/parameters/PerPage"
+      - $ref: "#/components/parameters/NextId"
+    get:
+      tags: [related]
+      operationId: getLinks2hop
+      summary: 2-hop の関連ページ
+      description: |
+        1-hop の近傍は含まれない。
+
+        ページネーションは `links1hop` と同じで、`perPage` と `nextId` を使う。
+        `nextId` はそのページの最後の要素の `id` で返り、打ち切りの判定は `hasNext`
+        だけで行う。
+        `search` はページ単位で適用されるため、途中のページが空になっても
+        カーソルはまだ先を指していることがある。
+      responses:
+        "200":
+          description: 近傍のページ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Links2hopResponse"
+        "401":
+          $ref: "#/components/responses/NotLoggedIn"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /pages/{projectName}/search/query:
+    parameters:
+      - $ref: "#/components/parameters/ProjectName"
+    get:
+      tags: [search]
+      operationId: searchPages
+      summary: 本文の全文検索
+      description: |
+        `skip` は受け付けない。
+        `limit`（実測では 100）を超えるヒットの続きを取る手段はこの API には無い。
+
+        `op=or` の有無でレスポンスの `query` は変わらず、`count` だけが変わる。
+        どちらで検索したかはレスポンスからは読めない。
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: 検索クエリ
+          schema:
+            type: string
+        - name: op
+          in: query
+          required: false
+          description: |
+            `or` を送ると複数語を OR で扱う。省略時は AND。
+          schema:
+            type: string
+            enum: [or]
+        - name: sort
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pageRank, updated]
+            default: pageRank
+      responses:
+        "200":
+          description: 検索結果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+        "401":
+          $ref: "#/components/responses/NotLoggedIn"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /pages/{projectName}/search/vector/titles:
+    parameters:
+      - $ref: "#/components/parameters/ProjectName"
+    get:
+      tags: [search]
+      operationId: searchTitlesByVector
+      summary: ベクトル検索
+      description: |
+        **検索対象はページタイトルと本文中のリンク記法だけ**で、本文の通常テキストは対象外である。
+
+        実測では 20 件が類似度の降順で返った。
+        top-level には `pages` 以外の field が無い。
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: 検索クエリ
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 検索結果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VectorSearchResponse"
+        "401":
+          $ref: "#/components/responses/NotLoggedIn"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "490":
+          $ref: "#/components/responses/UpdatingSearchServer"
+
+  /commits/{projectName}/{pageId}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectName"
+      - name: pageId
+        in: path
+        required: true
+        description: ページの不変 ID
+        schema:
+          type: string
+          pattern: "^[0-9a-f]{24}$"
+        example: 6a78192b3a6ddc39bdf42b47
+    get:
+      tags: [history]
+      operationId: getCommits
+      summary: ページの編集履歴
+      description: |
+        タイトルではなく pageId 起点なので、リネームをまたいで追跡できる。
+
+        **公開プロジェクトでも無認証では 401 になる。**
+      security:
+        - PersonalAccessToken: []
+        - ServiceAccount: []
+        - SessionCookie: []
+      parameters:
+        - name: head
+          in: query
+          required: false
+          description: |
+            commitId。これより後の commit だけを返すカーソル。省略時は全履歴。
+            クライアントでは `since=` に対応する。
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 編集履歴（古い順）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommitsResponse"
+        "401":
+          $ref: "#/components/responses/NotLoggedIn"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /projects/{projectName}/users:
+    parameters:
+      - $ref: "#/components/parameters/ProjectName"
+    get:
+      tags: [projects]
+      operationId: getProjectUsers
+      summary: プロジェクトのメンバー一覧
+      description: |
+        ページや行の著者 ID を名前に解決するのに使う。
+
+        **公開プロジェクトを無認証で叩くと `users` しか返らず、その要素も
+        `{id, name}` だけになる。**
+        `displayName` や `email` の存在を前提にはできない。
+
+        Service Account では通り、`email` や `photo` まで含むフル情報が返る。
+        `serviceAccounts` に自分自身が現れる。
+
+        著者 ID は現メンバー、退去者、Service Account のいずれにも該当しうるので、
+        名前を解決するなら 4 つの配列すべてを 1 つの id → 情報マップにマージする。
+      responses:
+        "200":
+          description: メンバー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectUsersResponse"
+        "401":
+          $ref: "#/components/responses/NotLoggedIn"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /projects/{projectName}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectName"
+    get:
+      tags: [projects]
+      operationId: getProject
+      summary: 単一プロジェクトの情報
+      description: |
+        公開プロジェクトなら無認証で読める。
+
+        `GET /projects` の要素と重なるが、**同じ形ではない**。
+        こちらは設定 (`theme`, `translation`, `infobox` 等) とメンバー一覧を持ち、
+        `GET /projects` が持つ集計値 (`usersCount`, `adminsCount`, `isOwner`, `isAdmin`)
+        を持たない。
+
+        **Service Account は自分が属するプロジェクトに対しても 401 になる。**
+        同じプロジェクトの `/users` は通るのに、こちらだけ通らない。
+      responses:
+        "200":
+          description: プロジェクト
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDetail"
+        "401":
+          $ref: "#/components/responses/NotLoggedIn"
+        "404":
+          description: プロジェクトが存在しない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                name: NotFoundError
+                message: Project is not found
+
+  /projects:
+    get:
+      tags: [projects]
+      operationId: getProjects
+      summary: 参加しているプロジェクトの一覧
+      description: |
+        **認証が必須**である。
+        並び順は API 任せで、このクライアントはソートし直さない。
+
+        Service Account では 401 になる。ユーザーに紐づかないため。
+      security:
+        - PersonalAccessToken: []
+        - SessionCookie: []
+      responses:
+        "200":
+          description: プロジェクト一覧
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectsResponse"
+        "401":
+          $ref: "#/components/responses/NotLoggedIn"
+
+  /users/me:
+    get:
+      tags: [projects]
+      operationId: getMe
+      summary: 認証ユーザー自身の情報
+      description: |
+        `get_pages(filter_value=...)` に渡すのは `displayName` ではなく `name` なので、
+        その確認にこのエンドポイントを使う。
+
+        **無認証でも 401 にはならず、200 で `{"isGuest": true}` だけが返る**
+        （2026-08-09 実測）。
+        認証の有無はステータスコードではなく body から読む必要がある。
+        `get_me()` は `id` の無い body を `NotAuthenticatedError` にする。
+
+        Service Account でも同じ `{"isGuest": true}` が返る。ユーザーではないため。
+      responses:
+        "200":
+          description: |
+            認証済みならユーザー情報、無認証ならゲストを示す最小の body。
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Me"
+                  - $ref: "#/components/schemas/Guest"
+              examples:
+                authenticated:
+                  summary: 認証済み
+                  value:
+                    id: 5724627723541f110097c291
+                    name: shokai
+                    displayName: Sho Hashimoto
+                    email: shokai@example.com
+                    provider: google
+                    pageFilters:
+                      - type: icon
+                        value: shokai
+                    created: 1654254216
+                    updated: 1786255768
+                    isGuest: false
+                    config: {}
+                guest:
+                  summary: 無認証（実測）
+                  value:
+                    isGuest: true
+
+  /gcs/{fileId}/info:
+    parameters:
+      - name: fileId
+        in: path
+        required: true
+        description: |
+          24 桁の 16 進数。
+          `bare_file_id()` が拡張子付きの ID や完全な URL から素の ID を取り出す。
+        schema:
+          type: string
+          pattern: "^[0-9a-f]{24}$"
+        example: 5f151efbacbb17001a58f120
+    get:
+      tags: [files]
+      operationId: getFileInfo
+      summary: アップロードファイルのメタデータ
+      description: |
+        プロジェクトにアップロードされたファイルのメタデータと、そこから抽出されたテキスト。
+
+        **公開プロジェクトのファイルでも無認証では 401 になる。**
+        存在しない fileId は無認証でも 404 (`File not found.`) が返る。
+      security:
+        - PersonalAccessToken: []
+        - ServiceAccount: []
+        - SessionCookie: []
+      responses:
+        "200":
+          description: ファイルのメタデータ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileInfo"
+        "401":
+          $ref: "#/components/responses/NotLoggedIn"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /oembed-proxy/gyazo:
+    get:
+      tags: [files]
+      operationId: getGyazoOEmbed
+      summary: Gyazo の oEmbed を中継する
+      description: |
+        `get_file()` に Gyazo の URL を渡し、その URL に拡張子が無いときだけ叩く。
+        拡張子があれば oEmbed を経ずに `https://i.gyazo.com/<path>` へ直接組み替える。
+
+        `type` が `video` の場合、oEmbed の `url` は返らない。
+        `get_file()` は元 URL の hash から `https://i.gyazo.com/<hash>.mp4` を組み立てる。
+
+        数値 field は空文字で返ることがあり、`GyazoOEmbedBase` の `field_validator` が
+        空文字を `None` に、数値文字列を数値に正規化する。
+
+        **エラーの形が `/api/` の他のエンドポイントと違い、`name` field を持たない。**
+      security: []
+      parameters:
+        - name: url
+          in: query
+          required: true
+          description: "`https://gyazo.com/<hash>`（hash は 32 桁 16 進数）"
+          schema:
+            type: string
+            format: uri
+            pattern: "^https://gyazo\\.com/[0-9a-f]{32}$"
+          example: https://gyazo.com/07a850cf5f1404b494507cc6ec95b1b3
+      responses:
+        "200":
+          description: oEmbed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GyazoOEmbedResponse"
+              examples:
+                photo:
+                  summary: 画像（実測）
+                  value:
+                    version: "1.0"
+                    type: photo
+                    provider_name: Gyazo
+                    provider_url: https://gyazo.com
+                    url: https://i.gyazo.com/07a850cf5f1404b494507cc6ec95b1b3.png
+                    width: 420
+                    height: 590
+                    scale: 1.0
+                    title: ""
+                video:
+                  summary: 動画（実測）
+                  value:
+                    version: "1.0"
+                    type: video
+                    provider_name: Gyazo
+                    provider_url: https://gyazo.com
+                    html: <iframe src="https://gyazo.com/player/2b10554d1274b76f058a11b69c6a88dd" width="290" height="80" frameborder="0" allowfullscreen></iframe>
+                    thumbnail_url: https://thumb.gyazo.com/thumb/290_w/....jpg
+                    thumbnail_width: 290
+                    thumbnail_height: 80
+                    has_audio_track: false
+                    video_length_ms: 5800
+                    width: 290
+                    height: 80
+                    scale: 1.0
+                    title: ""
+        "404":
+          description: 存在しない hash
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OEmbedError"
+              example:
+                message: image not found.
+        "422":
+          description: "`url` の欠落や不正"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OEmbedError"
+              example:
+                message: url is not valid
+
+  /pages/v2/{projectName}/page-edit-for-ai/preview:
+    parameters:
+      - $ref: "#/components/parameters/ProjectName"
+    post:
+      tags: [edit]
+      operationId: previewPageEdit
+      summary: 編集の dry-run
+      description: |
+        何も書き込まずに `previewId` を返す。
+        有効期限は数分で、`expireAt` だけが ISO 8601 の文字列で返る。
+
+        **ヘッダーの資格情報が必須**である。
+        PAT でも Service Account Access Key でも通るが、cookie では通らない。
+
+        | リクエスト | 結果 |
+        | --- | --- |
+        | cookie のみ、`Origin` なし | 403 `CrossOriginWriteNotAllowedError` |
+        | cookie + `Origin: https://scrapbox.io` | 403 `PersonalAccessTokenRequiredError` |
+        | PAT（`Origin` の有無を問わない） | 200 |
+
+        `CrossOriginWriteNotAllowedError` は cookie 認証に対する CSRF ガードであり、
+        PAT 経路では `Origin` を見ていない。そのためこのクライアントは `Origin` を送らない。
+
+        `changes` は配列順に適用され、anchor は適用時点で存在していなければならない。
+        新規行の `lines.id` は **クライアントが生成する**
+        (`scrapbox.edits.new_line_id()` が `secrets.token_hex(12)`)。
+
+        `pagePreview` は v2 ページ取得と同じ形の全体が返る。
+        新規作成 (`pageId` を送らない) では次のようになる。
+
+        - **1 行目の `_insert` のテキストがページタイトルになる。**
+          `changes` が空だと `first change must be an _insert to create a new page` で拒否される
+        - `persistent` は false、`commitId` は key ごと不在。
+          ただし `linesCount` と `charsCount` は入る（実体の無いページの取得とは違う）
+        - `pagePreview.id` にはクライアントが送った 1 行目の line id が入る。
+          submit 後の実 page id も同じ値になる
+        - 同名ページがあると、**この時点で既に**タイトルに `_2` が付き、
+          1 行目のテキストも書き換わっている
+      security:
+        - PersonalAccessToken: []
+        - ServiceAccount: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EditPreviewRequest"
+            examples:
+              update:
+                summary: 既存ページの編集
+                value:
+                  pageId: 6a78192b3a6ddc39bdf42b47
+                  changes:
+                    - _update: 6a78192b3a6ddc39bdf42b47
+                      lines:
+                        text: hey
+              create:
+                summary: 新規ページ作成（pageId を送らない）
+                value:
+                  changes:
+                    - _insert: _end
+                      lines:
+                        id: 3f2a1c9b7e5d0a4c8b6f2d1e
+                        text: new page
+      responses:
+        "200":
+          description: preview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EditPreviewResponse"
+        "401":
+          $ref: "#/components/responses/NotLoggedIn"
+        "403":
+          $ref: "#/components/responses/WriteForbidden"
+        "404":
+          description: "`pageId` が存在しない"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "422":
+          description: |
+            changes が不正。
+            存在しない lineId を anchor にした、`_update` に複数行のテキストを送った、など。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /pages/v2/{projectName}/page-edit-for-ai/submit:
+    parameters:
+      - $ref: "#/components/parameters/ProjectName"
+    post:
+      tags: [edit]
+      operationId: submitPageEdit
+      summary: preview した編集を確定する
+      description: |
+        **ヘッダーの資格情報が必須**である。cookie では通らない。
+
+        `previewId` は 1 回限りで、submit すると消費される。
+        preview を作ったのと別のプロジェクトに submit することはできない。
+
+        新規作成時に同名ページが既にあると、サーバーがタイトルに suffix を付けることがある。
+        確定 URL は要求したタイトルではなくレスポンスの `page.title` から組み立てる。
+      security:
+        - PersonalAccessToken: []
+        - ServiceAccount: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EditSubmitRequest"
+      responses:
+        "200":
+          description: 確定した commit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EditSubmitResponse"
+        "400":
+          description: preview を作ったのと別のプロジェクトに submit した
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          $ref: "#/components/responses/NotLoggedIn"
+        "403":
+          $ref: "#/components/responses/WriteForbidden"
+        "404":
+          description: "`previewId` が見つからない、期限切れ、消費済み、他ユーザーのもの"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: |
+            preview 生成後に状態が変わった。
+            ページの最新状態を取り直して changes を作り直す。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConflictError"
+              examples:
+                notFastForward:
+                  summary: preview 生成後にページが更新された
+                  value:
+                    error: NotFastForward
+                duplicateTitle:
+                  summary: preview と submit の間に他人が同名ページを作った
+                  value:
+                    error: DuplicateTitle
+
+  /files/{fileId}:
+    servers:
+      - url: https://scrapbox.io
+        description: "`/api` の外にある。ファイル本体のダウンロード。"
+    parameters:
+      - name: fileId
+        in: path
+        required: true
+        description: 拡張子付きのファイル ID
+        schema:
+          type: string
+        example: 5f151efbacbb17001a58f120.png
+    get:
+      tags: [files]
+      operationId: downloadFile
+      summary: ファイル本体のダウンロード
+      description: |
+        302 で Google Cloud Storage の署名付き URL にリダイレクトする。
+        署名の有効期限は実測で 300 秒だった。
+
+        | リクエスト | リダイレクト先のバケット |
+        | --- | --- |
+        | `?type=thumbnail` なし | `scrapbox-file-distribute` |
+        | `?type=thumbnail` あり | `scrapbox-file-thumbnail` |
+
+        `_attach_pat` がホスト名で送信先を絞っているため、この署名付き URL に PAT は付かない。
+      parameters:
+        - name: type
+          in: query
+          required: false
+          description: |
+            `thumbnail` で縮小版を取る。
+            JPEG と PNG 以外は縮小版を持たず原本が返る。
+          schema:
+            type: string
+            enum: [thumbnail]
+      responses:
+        "302":
+          description: 署名付き URL へのリダイレクト
+          headers:
+            Location:
+              required: true
+              schema:
+                type: string
+                format: uri
+              example: https://storage.googleapis.com/scrapbox-file-distribute/57c7d712d25ef00f00100678/4cdc54cd70c8607f2a1c98246e28f
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  securitySchemes:
+    PersonalAccessToken:
+      type: apiKey
+      in: header
+      name: x-personal-access-token
+      description: |
+        `https://scrapbox.io/settings/personal-access-tokens` で発行する。
+
+        クライアントのデフォルトヘッダーには入れず、リクエストごとのイベントフックで
+        `request.url.host == "scrapbox.io"` のときだけ付けている。
+        `get_file()` が Gyazo や GCS の署名付き URL へリダイレクトを追うため、
+        ホスト名で絞ってサードパーティへの流出を防いでいる。
+    ServiceAccount:
+      type: apiKey
+      in: header
+      name: x-service-account-access-key
+      description: |
+        Business プロジェクトの設定画面の Service Accounts タブで発行する、
+        プロジェクト 1 つに紐づくキー。値は `cs_` で始まる。
+
+        **キーが属するプロジェクト以外はすべて 400 になる。公開プロジェクトも例外ではない。**
+
+        ```json
+        {"name":"BadRequestError","message":"Service account is not available for this project."}
+        ```
+
+        ユーザーではないので、ユーザーを前提とするエンドポイントは通らない
+        (`GET /projects`, `GET /projects/:project` は 401、`GET /users/me` は
+        `{"isGuest": true}`)。
+        一方で読み取りだけでなく**書き込みもできる**: 編集 API は 200 を返し、
+        commit の `userId` は Service Account 自身の id になる。
+
+        Service Account によるアクセスはプロジェクトの IP アドレス制限を受けない。
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: connect.sid
+      description: |
+        ブラウザの cookie。
+        PAT と両方渡した場合は PAT が優先され、cookie は送らない。
+
+        **編集系 (`page-edit-for-ai/*`) は cookie では通らない。**
+
+  parameters:
+    ProjectName:
+      name: projectName
+      in: path
+      required: true
+      description: プロジェクト名（URL に使われる `name`）
+      schema:
+        type: string
+      example: help-jp
+    EncodedTitle:
+      name: encodedTitle
+      in: path
+      required: true
+      description: |
+        ページタイトル。
+        サーバーの route が `/:project/:title` で `:title` に `/` を含められないため、
+        クライアントは `urllib.parse.quote(title, safe="")` で `/` も空白も非 ASCII も
+        すべて percent-encode する。
+        空白は `%20` でも `_` でも同じページに解決される。
+
+        人間可読 URL を組み立てる `scrapbox.client.page_url()` はこれとは別のエンコードで、
+        `%` `/` `?` `#` だけを percent-encode して空白を `_` に置換する。
+      schema:
+        type: string
+      example: "%E3%83%96%E3%83%A9%E3%82%B1%E3%83%86%E3%82%A3%E3%83%B3%E3%82%B0"
+    RelatedSearch:
+      name: search
+      in: query
+      required: false
+      description: 関連ページを全文検索で絞り込む
+      schema:
+        type: string
+    MatchAnyOp:
+      name: op
+      in: query
+      required: false
+      description: "`or` を送ると複数語を OR で扱う。省略時は AND。"
+      schema:
+        type: string
+        enum: [or]
+    PerPage:
+      name: perPage
+      in: query
+      required: false
+      description: |
+        1 リクエストで返る件数。
+        範囲外は API 側で丸められるため、このクライアントは 1〜1000 のみを送る。
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 1000
+    NextId:
+      name: nextId
+      in: query
+      required: false
+      description: カーソル。前のページの `pagination.nextId` をそのまま送る。
+      schema:
+        type: string
+
+  responses:
+    NotLoggedIn:
+      description: 認証が要るエンドポイントに無認証でアクセスした
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            name: NotLoggedInError
+            message: You are not logged in yet.
+            details:
+              project: help-jp
+              loginStrategies: [google]
+    NotFound:
+      description: ページまたはプロジェクトが存在しない
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            name: NotFoundError
+            message: Page not found
+            details:
+              linkTo: https://scrapbox.io/help-jp/
+    WriteForbidden:
+      description: |
+        cookie 認証で叩いた、または PAT はあるがプロジェクトの member でない。
+
+        このクライアントは PAT が無ければリクエストを送らずに
+        `PersonalAccessTokenRequiredError` を投げる (`_post_json`)。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          examples:
+            crossOrigin:
+              summary: cookie 認証、`Origin` なし
+              value:
+                name: CrossOriginWriteNotAllowedError
+                message: Cross origin write is not allowed.
+            patRequired:
+              summary: cookie 認証、`Origin` あり
+              value:
+                name: PersonalAccessTokenRequiredError
+                message: Personal access token is required.
+    UpdatingSearchServer:
+      description: |
+        **非標準の HTTP 490。**
+        ベクトル検索のバックエンドが更新中で、一時的なもの。再試行すれば 200 になる。
+
+        このクライアントは 490 を `SearchServerUpdatingError` として他の 4xx / 5xx と
+        区別する (`_raise_for_status`)。
+        待ち時間が読めないため自動再試行はせず、判断は呼び出し側に委ねている。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            name: UpdatingSearchServerError
+            message: Updating search server. Please try again later.
+
+  schemas:
+    ApiError:
+      type: object
+      description: |
+        `/api/` 配下のエラーの共通形（`oembed-proxy` を除く）。
+        `details` は付かないことのほうが多い。
+      properties:
+        name:
+          type: string
+          description: エラー名
+          examples:
+            - NotLoggedInError
+            - NotFoundError
+            - CrossOriginWriteNotAllowedError
+            - PersonalAccessTokenRequiredError
+            - UpdatingSearchServerError
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+      required: [name, message]
+
+    OEmbedError:
+      type: object
+      description: |
+        `oembed-proxy` のエラー。
+        `/api/` の他のエンドポイントと違い `name` field を持たない。
+      properties:
+        message:
+          type: string
+      required: [message]
+
+    ConflictError:
+      type: object
+      description: 編集 submit の 409。他のエラーと違い `error` の 1 field だけを持つ。
+      properties:
+        error:
+          type: string
+          enum: [NotFastForward, DuplicateTitle]
+      required: [error]
+
+    UnixSeconds:
+      type: integer
+      description: unix 秒。このクライアントは変換せず整数のまま返す。
+      examples: [1559895723]
+
+    User:
+      type: object
+      description: |
+        `id` 以外はすべて欠けうる。
+        公開プロジェクトを無認証で読むと `{id}` か `{id, name}` だけになる。
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          description: ログイン名。`filterValue` に渡すのはこちら。
+        displayName:
+          type: string
+        photo:
+          type: [string, "null"]
+        email:
+          type: string
+      required: [id]
+
+    PageFilter:
+      type: object
+      properties:
+        type:
+          type: string
+          examples: [icon]
+        value:
+          type: string
+      required: [type, value]
+
+    Me:
+      allOf:
+        - $ref: "#/components/schemas/User"
+        - type: object
+          properties:
+            provider:
+              type: string
+              examples: [google]
+            pageFilters:
+              type: array
+              description: ページ一覧のフィルタ設定
+              items:
+                $ref: "#/components/schemas/PageFilter"
+            created:
+              $ref: "#/components/schemas/UnixSeconds"
+            updated:
+              $ref: "#/components/schemas/UnixSeconds"
+            isGuest:
+              type: boolean
+            config:
+              type: object
+              additionalProperties: true
+
+    Guest:
+      type: object
+      description: 無認証で `GET /users/me` を叩いたときの body。
+      properties:
+        isGuest:
+          const: true
+      required: [isGuest]
+
+    ProjectMember:
+      allOf:
+        - $ref: "#/components/schemas/User"
+        - type: object
+          properties:
+            provider:
+              type: string
+              examples: [google, microsoft, saml]
+            created:
+              $ref: "#/components/schemas/UnixSeconds"
+            updated:
+              $ref: "#/components/schemas/UnixSeconds"
+
+    MemberSnapshot:
+      type: object
+      description: 退去済み、削除済みメンバーの記録
+      properties:
+        id:
+          type: string
+        reason:
+          type: string
+          enum: [deleted, left]
+        created:
+          $ref: "#/components/schemas/UnixSeconds"
+        updated:
+          $ref: "#/components/schemas/UnixSeconds"
+        data:
+          $ref: "#/components/schemas/User"
+      required: [id]
+
+    ServiceAccount:
+      type: object
+      properties:
+        id:
+          type: string
+        usage:
+          type: string
+          description: 用途ラベルであって人名ではない
+      required: [id]
+
+    ProjectUsersResponse:
+      type: object
+      description: |
+        公開プロジェクトを無認証で叩くと `users` しか返らない。
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectMember"
+        memberSnapshots:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemberSnapshot"
+        serviceAccounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceAccount"
+        serviceAccountSnapshots:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceAccount"
+      required: [users]
+
+    Project:
+      type: object
+      description: "`GET /projects` が返す要素。集計値を持つ。"
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          description: URL に使われる名前
+        displayName:
+          type: string
+        publicVisible:
+          type: boolean
+        loginStrategies:
+          type: array
+          items:
+            type: string
+        plan:
+          type: [string, "null"]
+        additionalPlans:
+          type: object
+          additionalProperties:
+            type: boolean
+        alert:
+          type: [object, "null"]
+          additionalProperties: true
+        usersCount:
+          type: integer
+        isMember:
+          type: boolean
+        billingId:
+          type: [string, "null"]
+        created:
+          $ref: "#/components/schemas/UnixSeconds"
+        updated:
+          $ref: "#/components/schemas/UnixSeconds"
+        isOwner:
+          type: boolean
+        isAdmin:
+          type: boolean
+        adminsCount:
+          type: integer
+      required: [id, name]
+
+    ProjectsResponse:
+      type: object
+      properties:
+        projects:
+          type: array
+          items:
+            $ref: "#/components/schemas/Project"
+      required: [projects]
+
+    ProjectDetail:
+      description: |
+        `GET /projects/:projectName` が返す形。
+        設定とメンバー一覧を持つ代わりに、`usersCount` / `adminsCount` / `isOwner` /
+        `isAdmin` は返らない。
+      allOf:
+        - $ref: "#/components/schemas/Project"
+        - type: object
+          properties:
+            theme:
+              type: string
+              examples: [blue]
+            image:
+              type: [string, "null"]
+              description: プロジェクトのアイコン URL
+            gyazoTeamsName:
+              type: [string, "null"]
+            translation:
+              type: boolean
+            infobox:
+              type: boolean
+            disableRealtimeCollaboration:
+              type: boolean
+            users:
+              type: array
+              description: メンバー。公開プロジェクトでは `{id, name}` だけ。
+              items:
+                $ref: "#/components/schemas/User"
+
+    InfoboxResult:
+      type: object
+      description: |
+        このページ本文から抽出された Infobox。
+        `hallucination`（抽出器が埋めた不確実な値）または `truncated`（抽出が途中で切れた）
+        が立っている結果は信用できない。
+      properties:
+        title:
+          type: string
+        infobox:
+          type: object
+          additionalProperties: true
+        hallucination:
+          type: boolean
+        truncated:
+          type: boolean
+
+    Line:
+      type: object
+      description: |
+        行の著者は `User` オブジェクトではなく `userId` 文字列で返るので、
+        名前を出すには `/projects/:project/users` と突き合わせる。
+      properties:
+        id:
+          type: string
+        text:
+          type: string
+        userId:
+          type: string
+        created:
+          $ref: "#/components/schemas/UnixSeconds"
+        updated:
+          $ref: "#/components/schemas/UnixSeconds"
+      required: [id, text, userId, created, updated]
+
+    PageListItem:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        image:
+          type: [string, "null"]
+          description: サムネイル画像の URL
+        descriptions:
+          type: array
+          description: 冒頭数行の抜粋
+          items:
+            type: string
+        user:
+          $ref: "#/components/schemas/User"
+        lastUpdateUser:
+          oneOf:
+            - $ref: "#/components/schemas/User"
+            - type: "null"
+        users:
+          type: array
+          description: 編集したことのあるユーザー
+          items:
+            $ref: "#/components/schemas/User"
+        pin:
+          type: integer
+          description: |
+            0 か正の整数で、正なら固定表示されている。
+            `9007197717386014` のような巨大な数になり、大きいほど前に来る。
+          examples: [0, 9007197717386014]
+        views:
+          type: integer
+        linked:
+          type: integer
+          description: 被リンク数
+        created:
+          $ref: "#/components/schemas/UnixSeconds"
+        updated:
+          $ref: "#/components/schemas/UnixSeconds"
+        accessed:
+          $ref: "#/components/schemas/UnixSeconds"
+        linesCount:
+          type: integer
+        charsCount:
+          type: integer
+        helpfeels:
+          type: array
+          description: |
+            Helpfeel 記法の行から抽出された質問文。
+            本文中の `?` と半角スペースで始まる行が対象で、その接頭辞を除いた部分が入る。
+          items:
+            type: string
+      required:
+        [
+          id,
+          title,
+          descriptions,
+          user,
+          pin,
+          views,
+          linked,
+          created,
+          updated,
+          accessed,
+          linesCount,
+          charsCount,
+          helpfeels,
+        ]
+
+    PageListResponse:
+      type: object
+      properties:
+        projectName:
+          type: string
+        skip:
+          type: integer
+          description: 送った `skip`
+        limit:
+          type: integer
+          description: 実際に適用された `limit`（範囲外は丸められている）
+        count:
+          type: integer
+          description: 条件に一致するページの総数
+        pages:
+          type: array
+          items:
+            $ref: "#/components/schemas/PageListItem"
+      required: [projectName, skip, limit, count, pages]
+
+    PageBase:
+      type: object
+      description: |
+        v1 と v2 のページ詳細で共通の field。
+
+        `commitId` / `linesCount` / `charsCount` は、実体の無いページ
+        (`persistent: false`) では key ごと落ちる。
+      properties:
+        id:
+          type: string
+          description: |
+            pageId（不変）。
+            ただし `persistent: false` のページでは、リクエストのたびに変わる仮の値になる。
+        title:
+          type: string
+        image:
+          type: [string, "null"]
+        descriptions:
+          type: array
+          items:
+            type: string
+        persistent:
+          type: boolean
+          description: 実体のあるページなら true
+        commitId:
+          type: [string, "null"]
+          description: 最新コミット ID。実体の無いページでは key ごと落ちる。
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/Line"
+        links:
+          type: array
+          description: 本文中のリンク記法 `[title]` のタイトル
+          items:
+            type: string
+        icons:
+          type: array
+          description: "`[name.icon]` 記法のタイトル"
+          items:
+            type: string
+        projectLinks:
+          type: array
+          description: 別プロジェクトへのリンク
+          items:
+            type: string
+        files:
+          type: array
+          description: 本文から参照されているファイル ID
+          items:
+            type: string
+        helpfeels:
+          type: array
+          items:
+            type: string
+        pageRank:
+          type: number
+          description: 被リンクから計算される重要度
+        linked:
+          type: integer
+        views:
+          type: integer
+        pin:
+          type: integer
+        linesCount:
+          type: integer
+        charsCount:
+          type: integer
+        created:
+          $ref: "#/components/schemas/UnixSeconds"
+        updated:
+          $ref: "#/components/schemas/UnixSeconds"
+        accessed:
+          $ref: "#/components/schemas/UnixSeconds"
+        lastAccessed:
+          type: [integer, "null"]
+        snapshotCreated:
+          type: [integer, "null"]
+        snapshotCount:
+          type: integer
+          description: |
+            `help-jp` の実測レスポンスには現れなかった。
+          x-unverified: true
+        user:
+          $ref: "#/components/schemas/User"
+        lastUpdateUser:
+          oneOf:
+            - $ref: "#/components/schemas/User"
+            - type: "null"
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        infoboxDefinition:
+          type: array
+          description: Infobox 定義行
+          items:
+            type: string
+        infoboxDisableLinks:
+          type: array
+          description: Infobox でリンク化しない項目
+          items:
+            type: string
+        infoboxResult:
+          type: array
+          items:
+            $ref: "#/components/schemas/InfoboxResult"
+      required:
+        [
+          id,
+          title,
+          descriptions,
+          user,
+          pin,
+          views,
+          linked,
+          created,
+          updated,
+          accessed,
+          pageRank,
+          helpfeels,
+          persistent,
+          lines,
+          links,
+          icons,
+          projectLinks,
+          files,
+          infoboxDefinition,
+          infoboxDisableLinks,
+          infoboxResult,
+        ]
+
+    PageDetail:
+      description: v1 のページ詳細。関連ページを同梱する。
+      allOf:
+        - $ref: "#/components/schemas/PageBase"
+        - type: object
+          properties:
+            relatedPages:
+              $ref: "#/components/schemas/RelatedPages"
+
+    PageDetailV2:
+      description: v2 のページ詳細。正規化 field を持ち、関連ページは持たない。
+      allOf:
+        - $ref: "#/components/schemas/PageBase"
+        - type: object
+          properties:
+            linksLc:
+              $ref: "#/components/schemas/NormalizedTitles"
+            iconsLc:
+              $ref: "#/components/schemas/NormalizedTitles"
+            projectLinksLc:
+              $ref: "#/components/schemas/NormalizedTitles"
+
+    NormalizedTitles:
+      type: array
+      description: |
+        正規化形のタイトル。
+        「空白を `_` に置換して小文字化」した形で、リンク関係の比較に使う。
+      items:
+        type: string
+
+    LinkPage:
+      type: object
+      description: |
+        1-hop または 2-hop の近傍にあるページ。
+
+        **どの field が入るかは要素ごとに違う。**
+        `infobox*` を持つ要素と持たない要素が同じレスポンスに混在するため、
+        `id` と `title` 以外はすべて optional である。
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        titleLc:
+          type: string
+        image:
+          type: [string, "null"]
+        descriptions:
+          type: array
+          items:
+            type: string
+        linksLc:
+          $ref: "#/components/schemas/NormalizedTitles"
+        linked:
+          type: integer
+        pageRank:
+          type: number
+        views:
+          type: integer
+        linesCount:
+          type: integer
+        charsCount:
+          type: integer
+        created:
+          $ref: "#/components/schemas/UnixSeconds"
+        updated:
+          $ref: "#/components/schemas/UnixSeconds"
+        accessed:
+          $ref: "#/components/schemas/UnixSeconds"
+        lastAccessed:
+          type: [integer, "null"]
+        user:
+          $ref: "#/components/schemas/User"
+        lastUpdateUser:
+          oneOf:
+            - $ref: "#/components/schemas/User"
+            - type: "null"
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        infoboxDefinition:
+          type: array
+          items:
+            type: string
+        infoboxDisableLinks:
+          type: array
+          items:
+            type: string
+        infoboxResult:
+          type: array
+          items:
+            $ref: "#/components/schemas/InfoboxResult"
+        search:
+          $ref: "#/components/schemas/SearchHighlight"
+      required: [id, title]
+
+    SearchHighlight:
+      type: object
+      description: |
+        ハイライトすべき語。
+        `search` クエリを付けて呼んだときだけ各要素に現れる。
+      properties:
+        words:
+          type: array
+          items:
+            type: string
+        excludes:
+          type: array
+          items:
+            type: string
+      examples:
+        - words: [リンク]
+          excludes: []
+
+    Pagination:
+      type: object
+      properties:
+        perPage:
+          type: integer
+          description: 実際に適用された件数（1〜1000 に丸められている）
+        total:
+          type: integer
+          description: 近傍全体の件数。`search` で絞っても減らない。
+        hasNext:
+          type: boolean
+          description: 打ち切りの判定はこれだけで行う。
+        nextId:
+          type: [string, "null"]
+          description: |
+            このページの最後の要素の `id`。
+            そのまま `nextId` に送ると、その要素の次から返る。
+      required: [perPage, total, hasNext, nextId]
+
+    Links1hopResponse:
+      type: object
+      properties:
+        links1hop:
+          type: array
+          items:
+            $ref: "#/components/schemas/LinkPage"
+        charsCount:
+          type: integer
+          description: 対象ページの文字数
+        hasBackLinksOrIcons:
+          type: boolean
+        kcsControlTagsLc:
+          type: array
+          description: Helpfeel の制御タグ（正規化形）
+          items:
+            type: string
+        synonyms:
+          type: array
+          description: |
+            同義語。実測では常に空配列で、要素の形が確認できていない。
+          items: true
+          x-unverified: true
+        searchBackend:
+          type: [string, "null"]
+          examples: [elasticsearch]
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+      required: [links1hop]
+
+    Links2hopResponse:
+      type: object
+      description: 1-hop の近傍は含まれない。
+      properties:
+        links2hop:
+          type: array
+          items:
+            $ref: "#/components/schemas/LinkPage"
+        hiddenHeadwordsLc:
+          type: array
+          description: 表示から隠された見出し語（正規化形）
+          items:
+            type: string
+        synonyms:
+          type: array
+          items: true
+          x-unverified: true
+        searchBackend:
+          type: [string, "null"]
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+      required: [links2hop]
+
+    RelatedPages:
+      type: object
+      description: v1 のページ詳細に同梱される関連ページ。
+      properties:
+        links1hop:
+          type: array
+          items:
+            $ref: "#/components/schemas/LinkPage"
+        links2hop:
+          type: array
+          items:
+            $ref: "#/components/schemas/LinkPage"
+        projectLinks1hop:
+          type: array
+          items: true
+        charsCount:
+          description: |
+            **数値ではなく hop ごとの dict で返る。**
+            `RelatedPages.chars_count` の型が `dict[str, int] | int | None` なのはこのため。
+          oneOf:
+            - type: object
+              properties:
+                links1hop:
+                  type: integer
+                links2hop:
+                  type: integer
+              additionalProperties:
+                type: integer
+            - type: integer
+            - type: "null"
+          examples:
+            - links1hop: 12294
+              links2hop: 7618
+        hasBackLinksOrIcons:
+          type: boolean
+        hiddenHeadwordsLc:
+          type: array
+          items:
+            type: string
+        fatHeadwordsLc:
+          type: array
+          items:
+            type: string
+        search:
+          description: 実測では空文字列。
+          type: [string, "null"]
+        searchBackend:
+          type: [string, "null"]
+
+    SearchResultPage:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        image:
+          type: [string, "null"]
+        user:
+          $ref: "#/components/schemas/User"
+        lastUpdateUser:
+          oneOf:
+            - $ref: "#/components/schemas/User"
+            - type: "null"
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        views:
+          type: integer
+        linked:
+          type: integer
+        created:
+          $ref: "#/components/schemas/UnixSeconds"
+        updated:
+          $ref: "#/components/schemas/UnixSeconds"
+        pageRank:
+          type: number
+        linesCount:
+          type: integer
+        charsCount:
+          type: integer
+        words:
+          type: array
+          description: マッチした語
+          items:
+            type: string
+        lines:
+          type: array
+          description: マッチした本文行。行オブジェクトではなく文字列の配列。
+          items:
+            type: string
+      required: [id, title]
+
+    SearchResponse:
+      type: object
+      properties:
+        projectName:
+          type: string
+        searchQuery:
+          type: string
+          description: 送ったクエリ文字列
+        query:
+          $ref: "#/components/schemas/SearchHighlight"
+        field:
+          type: string
+          description: 検索対象。実測では `lines`。
+          examples: [lines]
+        backend:
+          type: string
+          examples: [elasticsearch]
+        count:
+          type: integer
+          description: ヒット件数
+        limit:
+          type: integer
+          description: 返却上限。実測では 100。
+        existsExactTitleMatch:
+          type: boolean
+          description: クエリと完全一致するタイトルが存在するか
+        pages:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchResultPage"
+      required: [projectName, searchQuery, count, limit, pages]
+
+    VectorSearchPage:
+      type: object
+      description: |
+        `exists` の値で持つ field が変わる。
+
+        | `exists` | 入る field |
+        | --- | --- |
+        | true | `title`, `score`, `image`, `linked`, `id`, `user`, `lastUpdateUser`, `users`, `views`, `created`, `updated`, `pageRank`, `linesCount`, `charsCount` |
+        | false | `title`, `score`, `image`, `linked` のみ |
+
+        `exists: false` は、どこかのページからリンクされているだけで実体の無いページである。
+      properties:
+        title:
+          type: string
+        score:
+          type: number
+          description: 類似度。降順に並ぶ。
+        exists:
+          type: boolean
+        image:
+          type: [string, "null"]
+        linked:
+          type: integer
+        id:
+          type: string
+        user:
+          $ref: "#/components/schemas/User"
+        lastUpdateUser:
+          oneOf:
+            - $ref: "#/components/schemas/User"
+            - type: "null"
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        views:
+          type: integer
+        created:
+          $ref: "#/components/schemas/UnixSeconds"
+        updated:
+          $ref: "#/components/schemas/UnixSeconds"
+        pageRank:
+          type: number
+        linesCount:
+          type: integer
+        charsCount:
+          type: integer
+      required: [title, score]
+
+    VectorSearchResponse:
+      type: object
+      properties:
+        pages:
+          type: array
+          items:
+            $ref: "#/components/schemas/VectorSearchPage"
+      required: [pages]
+
+    ChangeLines:
+      type: object
+      properties:
+        id:
+          type: string
+        text:
+          type: string
+        origText:
+          type: string
+          description: 変更前のテキスト。`_update` の change にだけ現れる。
+
+    InsertChange:
+      type: object
+      description: |
+        行の挿入。
+        anchor は挿入先の直前の行 ID、またはページ末尾を表す `_end`。
+      properties:
+        _insert:
+          type: string
+          examples: [_end, 6a78192b3a6ddc39bdf42b47]
+        lines:
+          $ref: "#/components/schemas/ChangeLines"
+      required: [_insert, lines]
+
+    UpdateChange:
+      type: object
+      description: 単一行のテキストの置換。複数行は扱えない。
+      properties:
+        _update:
+          type: string
+        lines:
+          $ref: "#/components/schemas/ChangeLines"
+      required: [_update, lines]
+
+    DeleteChange:
+      type: object
+      description: 行の削除。
+      properties:
+        _delete:
+          type: string
+        lines:
+          $ref: "#/components/schemas/ChangeLines"
+      required: [_delete]
+
+    TitleChange:
+      type: object
+      description: ページタイトルの変更。
+      properties:
+        title:
+          type: string
+        titleLc:
+          type: string
+      required: [title]
+
+    PageChange:
+      description: |
+        commit に含まれる 1 つの change。
+        判別用の key を一つだけ持つ。
+
+        本文の編集に加えて、`linesCount` / `charsCount` / `links` / `icons` /
+        `descriptions` / `helpfeels` / `infobox*` といった派生メタデータの change も
+        同じ配列に混ざって返る。
+        それらには専用のモデルを持たせず、union 末尾の任意 object に落ちる。
+        未知の形が来てもバリデーションで落ちないようにするための構成である。
+      anyOf:
+        - $ref: "#/components/schemas/InsertChange"
+        - $ref: "#/components/schemas/UpdateChange"
+        - $ref: "#/components/schemas/DeleteChange"
+        - $ref: "#/components/schemas/TitleChange"
+        - type: object
+          description: 派生メタデータの change
+          additionalProperties: true
+          examples:
+            - linesCount: 1
+
+    Commit:
+      type: object
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          description: テストが持つ実レスポンス由来のサンプルでは `page` だった。
+          examples: [page]
+        changes:
+          type: array
+          items:
+            $ref: "#/components/schemas/PageChange"
+        parentId:
+          type: [string, "null"]
+          description: 先行 commit が無ければ null。
+        pageId:
+          type: string
+        userId:
+          type: string
+        created:
+          $ref: "#/components/schemas/UnixSeconds"
+      required: [id]
+
+    CommitsResponse:
+      type: object
+      properties:
+        commits:
+          type: array
+          description: 古い順
+          items:
+            $ref: "#/components/schemas/Commit"
+      required: [commits]
+
+    FileInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        projectName:
+          type: string
+        text:
+          type: [string, "null"]
+          description: |
+            抽出テキスト（画像の OCR、PDF の本文など）。API 側で切り詰められる。
+        originalname:
+          type: [string, "null"]
+          description: アップロード時のファイル名
+        contentType:
+          type: [string, "null"]
+          examples: [image/png]
+        size:
+          type: [integer, "null"]
+          description: バイト数
+      required: [id]
+
+    EditPreviewRequest:
+      type: object
+      properties:
+        pageId:
+          type: string
+          description: |
+            既存ページを編集するときだけ送る。
+            新規ページ作成では body から省く (`preview_page_edit(page_id=None)`)。
+        changes:
+          type: array
+          description: |
+            配列順に適用される。
+            anchor（`_insert` / `_update` / `_delete` の値）は適用時点で
+            存在していなければならない。
+          items:
+            anyOf:
+              - $ref: "#/components/schemas/InsertChange"
+              - $ref: "#/components/schemas/UpdateChange"
+              - $ref: "#/components/schemas/DeleteChange"
+      required: [changes]
+
+    PreviewLine:
+      type: object
+      properties:
+        id:
+          type: string
+        text:
+          type: string
+      required: [id, text]
+
+    PagePreview:
+      type: object
+      properties:
+        title:
+          type: string
+        persistent:
+          type: boolean
+          description: |
+            false ならこの編集はページの新規作成になる。true なら既存ページの更新。
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PreviewLine"
+
+    EditPreviewResponse:
+      type: object
+      properties:
+        previewId:
+          type: string
+        expireAt:
+          type: string
+          format: date-time
+          description: |
+            **レスポンス中で唯一 unix 秒でない時刻**で、ISO 8601 の文字列で返る。
+            preview の有効期限は数分。
+          examples: ["2026-08-09T06:47:53.590Z"]
+        pagePreview:
+          $ref: "#/components/schemas/PagePreview"
+      required: [previewId]
+
+    EditSubmitRequest:
+      type: object
+      properties:
+        previewId:
+          type: string
+          description: 1 回限りで、submit すると消費される。
+      required: [previewId]
+
+    SubmittedPage:
+      type: object
+      description: |
+        submit のレスポンスの `page`。
+
+        実際には **v2 ページ取得と key 単位で同じ全体**が返る（実測でキー集合を比較して
+        差分なし。更新でも新規作成でも同じ）。
+        ここでモデル化しているのは書き込み先を特定する 2 つだけで、残りは
+        `PageDetailV2` と重複するため省いてある。
+      properties:
+        id:
+          type: string
+          description: |
+            書き込まれたページの id。
+
+            新規作成では、1 行目の `_insert` に載せた line id がそのまま採用される。
+            つまりリクエストを送る前から分かる値である。
+          examples: [2b049d90fb091d365760e1c6]
+        title:
+          type: string
+          description: |
+            要求したタイトルと違うことがある。
+            同名ページが既にあるとサーバーが suffix (`_2`) を付け、1 行目のテキストも
+            それに合わせて書き換える。
+            この付与は submit ではなく **preview の時点で既に起きている**。
+
+    EditSubmitResponse:
+      type: object
+      properties:
+        commitId:
+          type: string
+        page:
+          $ref: "#/components/schemas/SubmittedPage"
+      required: [commitId]
+
+    GyazoOEmbedBase:
+      type: object
+      description: |
+        数値 field は空文字で返ることがある。
+      properties:
+        version:
+          const: "1.0"
+        provider_name:
+          type: string
+          examples: [Gyazo]
+        provider_url:
+          type: string
+          format: uri
+        width:
+          oneOf:
+            - type: integer
+            - type: string
+              description: 空文字。クライアント側で None に正規化する。
+        height:
+          oneOf:
+            - type: integer
+            - type: string
+        scale:
+          oneOf:
+            - type: number
+            - type: string
+        title:
+          type: string
+          description: 実測では空文字だった。
+      required: [version, provider_name, provider_url, title]
+
+    GyazoOEmbedPhoto:
+      allOf:
+        - $ref: "#/components/schemas/GyazoOEmbedBase"
+        - type: object
+          properties:
+            type:
+              const: photo
+            url:
+              type: string
+              format: uri
+              examples:
+                - https://i.gyazo.com/07a850cf5f1404b494507cc6ec95b1b3.png
+          required: [type, url]
+
+    GyazoOEmbedVideo:
+      description: |
+        `url` は返らない。
+        `get_file()` は元 URL の hash から `https://i.gyazo.com/<hash>.mp4` を組み立てる。
+      allOf:
+        - $ref: "#/components/schemas/GyazoOEmbedBase"
+        - type: object
+          properties:
+            type:
+              const: video
+            html:
+              type: string
+              description: 埋め込み用の iframe
+            thumbnail_url:
+              type: string
+              format: uri
+            thumbnail_width:
+              type: integer
+            thumbnail_height:
+              type: integer
+            has_audio_track:
+              type: boolean
+            video_length_ms:
+              type: integer
+          required:
+            [
+              type,
+              html,
+              thumbnail_url,
+              thumbnail_width,
+              thumbnail_height,
+              has_audio_track,
+              video_length_ms,
+            ]
+
+    GyazoOEmbedResponse:
+      description: |
+        `type` が `photo` でも `video` でもなければ、`get_file()` はモデル検証の前に
+        `ValueError` を投げる。
+      oneOf:
+        - $ref: "#/components/schemas/GyazoOEmbedPhoto"
+        - $ref: "#/components/schemas/GyazoOEmbedVideo"
+      discriminator:
+        propertyName: type
+        mapping:
+          photo: "#/components/schemas/GyazoOEmbedPhoto"
+          video: "#/components/schemas/GyazoOEmbedVideo"
