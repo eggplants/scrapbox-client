@@ -17,6 +17,7 @@ from scrapbox.client import (
     MAX_PAGE_SIZE,
     PAT_HEADER,
     SCRAPBOX_ORIGIN,
+    SERVICE_ACCOUNT_HEADER,
     ScrapboxClient,
     bare_file_id,
     page_url,
@@ -36,6 +37,7 @@ def build_client(
     handler: Any,  # noqa: ANN401
     pat: str | None = PAT,
     connect_sid: str | None = None,
+    service_account_key: str | None = None,
 ) -> ScrapboxClient:
     """Build a client whose requests are answered by a handler.
 
@@ -43,11 +45,17 @@ def build_client(
         handler: Callable taking an `httpx.Request` and returning an `httpx.Response`.
         pat: Personal access token to authenticate with.
         connect_sid: Cookie to authenticate with.
+        service_account_key: Service account access key to authenticate with.
 
     Returns:
         The client.
     """
-    return ScrapboxClient(connect_sid=connect_sid, pat=pat, transport=httpx.MockTransport(handler))
+    return ScrapboxClient(
+        connect_sid=connect_sid,
+        pat=pat,
+        service_account_key=service_account_key,
+        transport=httpx.MockTransport(handler),
+    )
 
 
 def json_handler(payload: Any, recorder: list[httpx.Request] | None = None) -> Any:  # noqa: ANN401
@@ -202,6 +210,47 @@ class TestAuthenticatedReads:
             client.search_titles_by_vector("my-project", "query")
 
 
+class TestErrorMessages:
+    """Test that the explanation in an error body survives into the exception.
+
+    The status code on its own is often uninformative: a service account pointed at
+    the wrong project gets a bare 400.
+    """
+
+    def test_named_error_is_reported(self) -> None:
+        """Test that both the name and the message of an API error are reported."""
+        payload = {"name": "BadRequestError", "message": "Service account is not available for this project."}
+
+        def handler(_: httpx.Request) -> httpx.Response:
+            return httpx.Response(400, json=payload)
+
+        with build_client(handler) as client, pytest.raises(httpx.HTTPStatusError) as excinfo:
+            client.get_pages("other-project")
+
+        assert "BadRequestError: Service account is not available for this project." in str(excinfo.value)
+        assert excinfo.value.response.status_code == httpx.codes.BAD_REQUEST
+
+    def test_message_only_error_is_reported(self) -> None:
+        """Test an error body carrying no name, as the edit endpoints send."""
+
+        def handler(_: httpx.Request) -> httpx.Response:
+            return httpx.Response(404, json={"message": "preview not found or expired"})
+
+        with build_client(handler) as client, pytest.raises(httpx.HTTPStatusError, match="preview not found"):
+            client.submit_page_edit("my-project", "000000000000000000000000")
+
+    def test_a_body_without_an_explanation_is_left_alone(self) -> None:
+        """Test that a non-JSON error body still raises the plain httpx error."""
+
+        def handler(_: httpx.Request) -> httpx.Response:
+            return httpx.Response(500, content=b"<html>oops</html>")
+
+        with build_client(handler) as client, pytest.raises(httpx.HTTPStatusError) as excinfo:
+            client.get_pages("my-project")
+
+        assert "oops" not in str(excinfo.value)
+
+
 class TestPageEdit:
     """Test the page edit endpoints."""
 
@@ -256,20 +305,90 @@ class TestPageEdit:
         assert "Origin" not in requests[0].headers
 
     def test_submit(self) -> None:
-        """Test committing a previewed edit."""
-        payload = {"commitId": "6a7821775ef194e8f89322cc", "page": {"title": "test"}}
+        """Test committing a previewed edit.
+
+        `page` arrives as a whole v2 page; only the id and the title are read out of
+        it, and the fields with no model must not get in the way.
+        """
+        payload = {
+            "commitId": "6a7821775ef194e8f89322cc",
+            "page": {
+                "id": self.PAGE_ID,
+                "title": "test",
+                "persistent": True,
+                "commitId": "6a7821775ef194e8f89322cc",
+                "lines": [{"id": self.PAGE_ID, "text": "test", "userId": "u1", "created": 1, "updated": 2}],
+                "linesCount": 1,
+                "charsCount": 4,
+            },
+        }
         requests: list[httpx.Request] = []
         with build_client(json_handler(payload, requests)) as client:
             result = client.submit_page_edit("my-project", "6a78216d0b154dadc8dcd414")
 
         assert result.commit_id == "6a7821775ef194e8f89322cc"
         assert result.page is not None
+        assert result.page.id == self.PAGE_ID
         assert result.page.title == "test"
         assert json.loads(requests[0].content) == {"previewId": "6a78216d0b154dadc8dcd414"}
 
-    @pytest.mark.parametrize("credentials", [{"pat": None}, {"pat": None, "connect_sid": "s%3Atest"}])
+    def test_submit_of_a_creation_reports_the_title_the_page_got(self) -> None:
+        """Test the response to a submit that created a page.
+
+        A title already taken gets a suffix and the first line is rewritten to match,
+        so the requested title and the resulting one differ. The page takes the id of
+        the line the first `_insert` carried.
+        """
+        line_id = "2b049d90fb091d365760e1c6"
+        payload = {
+            "commitId": "6a7847d78d06daa629829b15",
+            "page": {
+                "id": line_id,
+                "title": "sbc-create-test_2",
+                "persistent": True,
+                "lines": [{"id": line_id, "text": "sbc-create-test_2", "userId": "u1", "created": 1, "updated": 1}],
+            },
+        }
+        with build_client(json_handler(payload)) as client:
+            result = client.submit_page_edit("my-project", "6a78216d0b154dadc8dcd414")
+
+        assert result.page is not None
+        assert result.page.id == line_id
+        assert result.page.title == "sbc-create-test_2"
+
+    def test_submit_without_a_page_id(self) -> None:
+        """Test a submit response that names no id, so the id stays optional."""
+        payload = {"commitId": "6a7821775ef194e8f89322cc", "page": {"title": "test"}}
+        with build_client(json_handler(payload)) as client:
+            result = client.submit_page_edit("my-project", "6a78216d0b154dadc8dcd414")
+
+        assert result.page is not None
+        assert result.page.id is None
+        assert result.page.title == "test"
+
+    def test_a_service_account_may_write(self) -> None:
+        """Test that a service account access key is accepted for a write.
+
+        The API takes either header credential here; only a cookie is refused. An
+        edit submitted this way is attributed to the service account.
+        """
+        requests: list[httpx.Request] = []
+        with build_client(json_handler(self.PREVIEW_PAYLOAD, requests), pat=None, service_account_key="cs_test") as c:
+            preview = c.preview_page_edit("my-project", [], page_id=self.PAGE_ID)
+
+        assert preview.preview_id == "6a78216d0b154dadc8dcd414"
+        assert requests[0].headers[SERVICE_ACCOUNT_HEADER] == "cs_test"
+        assert PAT_HEADER not in requests[0].headers
+
+    @pytest.mark.parametrize(
+        "credentials",
+        [
+            {"pat": None},
+            {"pat": None, "connect_sid": "s%3Atest"},
+        ],
+    )
     def test_edit_without_pat_never_reaches_the_network(self, credentials: dict[str, Any]) -> None:
-        """Test that editing without a token fails before a request is sent.
+        """Test that editing without a header credential fails before a request is sent.
 
         The API rejects cookie authentication for these endpoints, so there is no
         point in sending the request.

@@ -10,11 +10,11 @@
   <https://github.com/eggplants/scrapbox-client/actions/workflows/ci.yml>
 )
 
-A client for [Scrapbox (Helpfeel Cosense)](https://scrapbox.io/product)
+[Scrapbox (Helpfeel Cosense)](https://scrapbox.io/product) のクライアント
 
-日本語版: [README.ja.md](README.ja.md)
+English version: [README.md](README.md)
 
-## Install
+## インストール
 
 ```bash
 pip install scrapbox-client
@@ -127,15 +127,15 @@ key, which takes precedence over `connect.sid`
 
 </details>
 
-### Saving a credential
+### 認証情報の保存
 
-`sbc login` reads one credential from stdin and saves it under `~/.config/sbc/`.
+`sbc login` は標準入力から認証情報を1つ読み取り、`~/.config/sbc/` の下に保存する。
 
-| Input prefix | Credential | Saved to |
+| 入力の接頭辞 | 認証情報 | 保存先 |
 | --- | --- | --- |
-| `s%` | `connect.sid` cookie | `~/.config/sbc/connect.sid` |
-| `pat_` | personal access token | `~/.config/sbc/pat` |
-| `cs_` | service account access key | `~/.config/sbc/service-account-key` |
+| `s%` | `connect.sid` クッキー | `~/.config/sbc/connect.sid` |
+| `pat_` | パーソナルアクセストークン | `~/.config/sbc/pat` |
+| `cs_` | サービスアカウントアクセスキー | `~/.config/sbc/service-account-key` |
 
 ```shellsession
 $ echo "pat_xxxxxxxx" | sbc login
@@ -146,9 +146,9 @@ Enter connect.sid, personal access token or service account access key:
 Saved to /home/you/.config/sbc/connect.sid
 ```
 
-## Library
+## ライブラリ
 
-### Overview
+### 概要
 
 ```python
 from scrapbox.client import ScrapboxClient
@@ -156,9 +156,9 @@ from scrapbox.client import ScrapboxClient
 PROJECT_NAME = "help-jp"
 PAGE_TITLE = "ブラケティング"
 
-# A public project can be accessed without authentication
+# 公開プロジェクトには認証なしでアクセスできる
 with ScrapboxClient() as client:
-    # Get the page list
+    # ページ一覧を取得する
     pages = client.get_pages(PROJECT_NAME, skip=0, limit=5)
     print(f"Project: {pages.project_name}")
     print(f"Total pages: {pages.count}")
@@ -170,7 +170,7 @@ with ScrapboxClient() as client:
     print()
     print()
 
-    # Get the details of an individual page
+    # 個別のページの詳細を取得する
     print("Get page details:")
     page_detail = client.get_page(PROJECT_NAME, PAGE_TITLE)
     print(f"Title: {page_detail.title}")
@@ -183,7 +183,7 @@ with ScrapboxClient() as client:
     print()
     print()
 
-    # Get the text of the page
+    # ページのテキストを取得する
     print("Page text:")
     text = client.get_page_text(PROJECT_NAME, PAGE_TITLE)
     print(text[:200] + "...")
@@ -191,7 +191,7 @@ with ScrapboxClient() as client:
     print()
     print()
 
-    # Get the icon URL
+    # アイコンの URL を取得する
     print("Icon URL:")
     icon_url = client.get_page_icon_url(PROJECT_NAME, PAGE_TITLE)
     print(icon_url)
@@ -199,8 +199,8 @@ with ScrapboxClient() as client:
 print()
 print()
 
-# A private project is accessed with authentication
-# A personal access token is issued from the Cosense settings page
+# 非公開プロジェクトには認証してアクセスする
+# パーソナルアクセストークンは Cosense の設定ページから発行する
 print("=== Example with authentication ===")
 pat = "pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 with ScrapboxClient(pat=pat) as client:
@@ -213,9 +213,9 @@ with ScrapboxClient(pat=pat) as client:
         print(f"Error: {e}")
 ```
 
-### Page size limit
+### ページサイズの上限
 
-Walk a project too large for one page with `skip`, or use `sbc all-pages`.
+1 ページに収まらない大きさのプロジェクトは `skip` でたどるか、`sbc all-pages` を使う。
 
 ```python
 from scrapbox import ScrapboxClient
@@ -231,50 +231,48 @@ with ScrapboxClient() as client:
     pages = client.get_pages("help-jp", limit=MAX_PAGE_SIZE)  # OK
 ```
 
-### Search and traversal
+### 検索と回遊
 
 ```python
 from scrapbox.client import ScrapboxClient
 
 with ScrapboxClient() as client:
-    # Full-text search. Pass match_any=True to return the pages matching any
-    # of the words.
+    # 全文検索。match_any=True を渡すと、いずれかの語に一致したページを返す。
     result = client.search_pages("help-jp", "リンク 検索", match_any=True)
     for page in result.pages:
         print(page.title, page.words)
 
-    # Vector search over page titles and the link notations in page bodies.
+    # ページタイトルと本文中のリンク記法を対象にしたベクトル検索。
     similar = client.search_titles_by_vector("help-jp", "ページを繋げる")
     for page in similar.pages:
         print(f"{page.score:.3f} {page.title}")
 
-    # The 1-hop and 2-hop neighbourhoods. They can be narrowed with a query.
+    # 1 hop と 2 hop の近傍。クエリで絞り込むこともできる。
     for page in client.get_links_1hop("help-jp", "ブラケティング").links1hop:
         print(page.title, page.linked, page.page_rank)
     print(len(client.get_links_2hop("help-jp", "ブラケティング").links2hop))
 
-    # One response holds at most 1000 neighbours. iter_links_* follows the
-    # cursor on its own, yielding one page at a time as they are consumed.
+    # 1 レスポンスに入る近傍は最大 1000 件。iter_links_* はカーソルを
+    # 自動でたどり、消費されるたびに 1 ページずつ yield する。
     for page in client.iter_links_1hop("help-jp", "ブラケティング"):
         print(page.title)
 
-    # A single project, with its settings and member list. No authentication
-    # is needed for a public project.
+    # 設定とメンバー一覧を含む単一プロジェクト。公開プロジェクトなら
+    # 認証はいらない。
     project = client.get_project("help-jp")
     print(project.display_name, project.theme, len(project.users))
 
-    # The v2 page endpoint carries the normalized *_lc fields.
+    # v2 のページエンドポイントは、正規化された *_lc フィールドを持つ。
     page_v2 = client.get_page_v2("help-jp", "ブラケティング")
     print(page_v2.links_lc, page_v2.icons_lc)
 
-    # The member list, for resolving an author id to a name. Departed members
-    # and service accounts are listed separately.
+    # 著者 ID を名前に解決するためのメンバー一覧。脱退したメンバーと
+    # サービスアカウントは別に列挙される。
     members = client.get_project_users("help-jp")
     print([member.name for member in members.users])
 ```
 
-The vector search answers HTTP 490 while it is being updated, so it has to be
-retried after a while.
+ベクトル検索の更新中はHTTP 490 を返すため、時間をおいて再試行する必要がある。
 
 ```python
 from scrapbox import ScrapboxClient, SearchServerUpdatingError
@@ -283,21 +281,19 @@ with ScrapboxClient() as client:
     try:
         client.search_titles_by_vector("help-jp", "リンク")
     except SearchServerUpdatingError:
-        ...  # try again later
+        ...  # あとで再試行する
 ```
 
-`get_me()` raises a `NotAuthenticatedError` when no credential was accepted.
-That endpoint does not answer 401.
-Without a credential it answers 200 with `{"isGuest": true}` and no user at all,
-so being logged out has to be read out of the body.
+認証情報が1つも受け付けられなかったとき、`get_me()` は `NotAuthenticatedError` を送出する。
+このエンドポイントは 401 を返さない。
+認証情報がなければ 200 と `{"isGuest": true}` を返してユーザーを含めないため、ログアウト状態はボディから読み取るほかない。
 
-### Editing a page
+### ページの編集
 
-Editing is a two-step flow.
-Preview the change first, then submit the preview id it returns.
-A preview is a dry run that writes nothing, expires after a few minutes, and can
-only be submitted once.
-A `connect.sid` cookie is rejected.
+編集は 2 段階の流れになる。
+まず変更をプレビューし、返ってきたプレビュー ID を送信する。
+プレビューは実際には書き込まない試行であり、数分で失効し、送信できるのは 1 回だけである。
+`connect.sid` クッキーは拒否される。
 
 ```python
 from scrapbox import ScrapboxClient, changes_from_ops
@@ -314,35 +310,32 @@ with ScrapboxClient(pat="pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx") as client:
     print(result.commit_id, result.page.id, result.page.title)
 ```
 
-### Files and history
+### ファイルと履歴
 
 ```python
 from scrapbox.client import ScrapboxClient
 
 with ScrapboxClient(pat="pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx") as client:
-    # Metadata of a file and the text extracted from it (OCR of an image, body of a PDF)
+    # ファイルのメタデータと、そこから抽出されたテキスト（画像の OCR、PDF の本文）
     info = client.get_file_info("60190edf1176d9001c13f8e8.png")
     print(info.originalname, info.content_type, info.size, info.text)
 
-    # The scaled down version of an image
+    # 画像の縮小版
     thumb = client.get_file("60190edf1176d9001c13f8e8.png", thumbnail=True)
 
-    # The edit history of a page. Keyed by page id, so it survives a rename.
-    # Pass since= to get only what changed after a commit you already know.
+    # ページの編集履歴。ページ ID を鍵にするのでリネームしても追える。
+    # since= を渡すと、既知のコミット以降の変更だけが返る。
     for commit in client.get_commits("my-project", "<pageId>").commits:
         print(commit.id, commit.user_id, commit.changes)
 
-    # The authenticated user and the projects they belong to
+    # 認証されたユーザーと、そのユーザーが所属するプロジェクト
     print(client.get_me().name)
     print([project.name for project in client.get_projects().projects])
 ```
 
-### Authentication
+### 認証
 
-A private project can be accessed with a
-[Personal Access Token](https://scrapbox.io/settings/personal-access-tokens), a
-[Service Account Access Key](https://scrapbox.io/help-jp/Service_Account) or a
-[`connect.sid` cookie](https://scrapbox.io/scrapboxlab/connect.sid).
+非公開プロジェクトには、[Personal Access Token](https://scrapbox.io/settings/personal-access-tokens) / [Service Account Access Key](https://scrapbox.io/help-jp/Service_Account) / [`connect.sid` Cookie](https://scrapbox.io/scrapboxlab/connect.sid) のいずれかでアクセスできる。
 
 ```python
 from scrapbox.client import ScrapboxClient
@@ -357,24 +350,21 @@ with ScrapboxClient(connect_sid="s%3AykQ__xxxxx-.xxxxx") as client:
     pages = client.get_pages("your-private-pj", limit=3)
 ```
 
-A service account comes with the following limits.
+サービスアカウントは以下の制限がある。
 
-- It is registered on one project of a Business plan and can only operate on
-  that project.
-- It stands for no particular user, so `get_me()`, `get_projects()` and
-  `get_project()` are not available to it.
-- Unlike the other credentials, a project's IP address restrictions do not
-  apply to it.
+- Business プランの 1 プロジェクトに登録され、そのプロジェクトのみ操作可能。
+- 特定のユーザーを表さないため、`get_me()`、`get_projects()`、`get_project()` は利用できない。
+- 他の認証情報と違い、プロジェクトの IP アドレス制限は適用されない。
 
-`connect.sid` cannot be used for `preview_page_edit()` and `submit_page_edit()`.
+`connect.sid` は `preview_page_edit()` と `submit_page_edit()` には使えない。
 
-### Images
+### 画像
 
 ```python
 from scrapbox.client import ScrapboxClient
 
 with ScrapboxClient() as client:
-    # Get an image by its file ID
+    # ファイル ID を指定して画像を取得する
     file_id = "1a2b3c4d5e6f7g8h9i0j.JPG"
     print(f"Fetching file: {file_id}")
 
@@ -382,7 +372,7 @@ with ScrapboxClient() as client:
         image_data = client.get_file(file_id)
         print(f"Successfully fetched: {len(image_data)} bytes")
 
-        # Save it to a file
+        # ファイルに保存する
         output_path = "downloaded_image.jpg"
         with open(output_path, "wb") as f:
             f.write(image_data)
@@ -393,7 +383,7 @@ with ScrapboxClient() as client:
 
     print()
 
-    # It can also be fetched with a full URL
+    # 完全な URL を指定して取得することもできる
     print("Fetch with full URL:")
     try:
         full_url = "https://gyazo.com/da78df293f9e83a74b5402411e2f2e01"
@@ -403,6 +393,6 @@ with ScrapboxClient() as client:
         print(f"Error: {e}")
 ```
 
-## License
+## ライセンス
 
 MIT

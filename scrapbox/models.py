@@ -515,9 +515,22 @@ class SubmittedPage(ScrapboxModel):
     """The page a submitted edit ended up writing to.
 
     The title can differ from the requested one: creating a page whose title is
-    already taken makes the server append a suffix.
+    already taken makes the server append a suffix, and it rewrites the first line
+    to match, so this is the only place the title a page actually got is reported.
+
+    The API answers with the whole page here, in the shape the v2 page endpoint
+    returns. Only the two fields that identify what was written are modelled; the
+    rest is left out rather than duplicated, since a page fetched afterwards carries
+    it in a type that is already checked against every case.
     """
 
+    id: str | None = None
+    """Id of the page written to.
+
+    A page the edit created takes the id of the line the first `_insert` carried, so
+    a caller that generated that id already knows this value; the response confirms
+    it.
+    """
     title: str | None = None
 
 

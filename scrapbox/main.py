@@ -23,11 +23,17 @@ CONNECT_SID_FILE_NAME = "connect.sid"
 PAT_FILE_NAME = "pat"
 """File name of the saved personal access token, under the config directory."""
 
+SERVICE_ACCOUNT_KEY_FILE_NAME = "service-account-key"
+"""File name of the saved service account access key, under the config directory."""
+
 CONNECT_SID_PREFIX = "s%"
 """Prefix identifying a connect.sid cookie value."""
 
 PAT_PREFIX = "pat_"
 """Prefix identifying a personal access token."""
+
+SERVICE_ACCOUNT_KEY_PREFIX = "cs_"
+"""Prefix identifying a service account access key."""
 
 
 class ScrapboxCliArgs(argparse.Namespace):
@@ -59,6 +65,8 @@ class ScrapboxCliArgs(argparse.Namespace):
     connect_sid_file: str | None = None
     pat: str | None = None
     pat_file: str | None = None
+    service_account_key: str | None = None
+    service_account_key_file: str | None = None
 
 
 def check_page_size_arg(value: str) -> int:
@@ -284,7 +292,7 @@ def _add_edit_commands(subparsers: argparse._SubParsersAction) -> None:
     # edit-preview command
     edit_preview_parser = subparsers.add_parser(
         "edit-preview",
-        help="Dry-run a page edit and get a preview ID (personal access token only)",
+        help="Dry-run a page edit and get a preview ID (no cookie auth)",
     )
     edit_preview_parser.add_argument("project", help="Project name")
     edit_preview_parser.add_argument("--page-id", default=None, help="Page ID to edit. Omit to create a new page")
@@ -294,7 +302,7 @@ def _add_edit_commands(subparsers: argparse._SubParsersAction) -> None:
     # edit-submit command
     edit_submit_parser = subparsers.add_parser(
         "edit-submit",
-        help="Commit a previewed page edit (personal access token only)",
+        help="Commit a previewed page edit (no cookie auth)",
     )
     edit_submit_parser.add_argument("project", help="Project name")
     edit_submit_parser.add_argument("preview_id", help="Preview ID returned by edit-preview")
@@ -339,11 +347,16 @@ def create_parser() -> argparse.ArgumentParser:
               sbc edit-submit my-project <previewId>
               echo "pat_xxxxxxxx" | sbc login
 
-            `edit-preview` and `edit-submit` are only available with a personal access
-            token: the API rejects `connect.sid` for them.
+            `edit-preview` and `edit-submit` need a personal access token or a
+            service account access key: the API rejects `connect.sid` for them
 
-            `sbc login` saves the credential read from stdin, choosing the file by
-            its prefix: `s%` for ~/.config/sbc/connect.sid, `pat_` for ~/.config/sbc/pat
+            a service account is registered on one project of a Business plan and
+            reaches only that one, so any other project answers 400 and `projects`,
+            `project` and `whoami` are out of its reach
+
+            `sbc login` saves the credential read from stdin, choosing the file by its
+            prefix: `s%` for ~/.config/sbc/connect.sid, `pat_` for ~/.config/sbc/pat,
+            `cs_` for ~/.config/sbc/service-account-key
 
             priority of `connect.sid` source:
               1. --connect-sid argument
@@ -357,7 +370,14 @@ def create_parser() -> argparse.ArgumentParser:
               3. ~/.config/sbc/pat file
               4. SBC_PAT environment variable
 
-            a personal access token takes precedence over `connect.sid`
+            priority of service account access key source:
+              1. --service-account-key argument
+              2. --service-account-key-file argument
+              3. ~/.config/sbc/service-account-key file
+              4. SBC_SERVICE_ACCOUNT_KEY environment variable
+
+            a personal access token takes precedence over a service account access
+            key, which takes precedence over `connect.sid`
             """
         ),
     )
@@ -391,6 +411,18 @@ def create_parser() -> argparse.ArgumentParser:
     pat_group.add_argument(
         "--pat-file",
         help="Path to file containing a personal access token (default: ~/.config/sbc/pat)",
+        default=None,
+    )
+
+    service_account_group = parser.add_mutually_exclusive_group()
+    service_account_group.add_argument(
+        "--service-account-key",
+        help="Service account access key, scoped to one Business project (takes precedence over connect.sid)",
+        default=None,
+    )
+    service_account_group.add_argument(
+        "--service-account-key-file",
+        help="Path to file containing a service account access key (default: ~/.config/sbc/service-account-key)",
         default=None,
     )
 
@@ -924,6 +956,9 @@ def cmd_edit_submit(client: ScrapboxClient, args: ScrapboxCliArgs) -> int:
     result = client.submit_page_edit(args.project, args.preview_id)
     title = result.page.title if result.page else None
     print(f"commitId: {result.commit_id}")
+    if result.page is not None and result.page.id is not None:
+        # For a page the edit created, this is the only place its id is reported.
+        print(f"pageId:   {result.page.id}")
     print(f"title:    {title}")
     if title is not None:
         print(f"url:      {page_url(args.project, title)}")
@@ -946,7 +981,7 @@ def read_credential_from_stdin() -> str:
         The credential string, stripped of surrounding whitespace.
     """
     if sys.stdin.isatty():
-        return getpass.getpass("Enter connect.sid or personal access token: ").strip()
+        return getpass.getpass("Enter connect.sid, personal access token or service account access key: ").strip()
     return sys.stdin.read().strip()
 
 
@@ -954,7 +989,8 @@ def save_credential(credential: str) -> Path:
     """Save a credential to the file matching its type.
 
     The credential type is detected from its prefix: `s%` for a connect.sid
-    cookie, `pat_` for a personal access token.
+    cookie, `pat_` for a personal access token, `cs_` for a service account
+    access key.
 
     Args:
         credential: The credential to save.
@@ -976,10 +1012,14 @@ def save_credential(credential: str) -> Path:
         file_name = CONNECT_SID_FILE_NAME
     elif credential.startswith(PAT_PREFIX):
         file_name = PAT_FILE_NAME
+    elif credential.startswith(SERVICE_ACCOUNT_KEY_PREFIX):
+        file_name = SERVICE_ACCOUNT_KEY_FILE_NAME
     else:
         msg = (
             f"Unknown credential type: expected a connect.sid starting with "
-            f"'{CONNECT_SID_PREFIX}' or a personal access token starting with '{PAT_PREFIX}'."
+            f"'{CONNECT_SID_PREFIX}', a personal access token starting with "
+            f"'{PAT_PREFIX}', or a service account access key starting with "
+            f"'{SERVICE_ACCOUNT_KEY_PREFIX}'."
         )
         raise ValueError(msg)
 
@@ -1064,6 +1104,23 @@ def get_pat(args: ScrapboxCliArgs) -> str | None:
     return get_credential(args.pat, args.pat_file, PAT_FILE_NAME, "SBC_PAT")
 
 
+def get_service_account_key(args: ScrapboxCliArgs) -> str | None:
+    """Get the service account access key from arguments or default location.
+
+    Args:
+        args: Parsed command-line arguments.
+
+    Returns:
+        The service account access key or None if not found.
+    """
+    return get_credential(
+        args.service_account_key,
+        args.service_account_key_file,
+        SERVICE_ACCOUNT_KEY_FILE_NAME,
+        "SBC_SERVICE_ACCOUNT_KEY",
+    )
+
+
 def main(*, test_args: list[str] | None = None) -> int:
     """Main entry point for CLI.
 
@@ -1084,7 +1141,11 @@ def main(*, test_args: list[str] | None = None) -> int:
     if args.handler is cmd_login:
         return cmd_login()
 
-    with ScrapboxClient(connect_sid=get_connect_sid(args), pat=get_pat(args)) as client:
+    with ScrapboxClient(
+        connect_sid=get_connect_sid(args),
+        pat=get_pat(args),
+        service_account_key=get_service_account_key(args),
+    ) as client:
         try:
             return args.handler(client, args)
         except Exception as e:  # noqa: BLE001

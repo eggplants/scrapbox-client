@@ -3,7 +3,7 @@
 import httpx
 import pytest
 
-from scrapbox.client import PAT_HEADER, ScrapboxClient
+from scrapbox.client import PAT_HEADER, SERVICE_ACCOUNT_HEADER, ScrapboxClient
 from scrapbox.exceptions import SearchServerUpdatingError
 
 
@@ -172,6 +172,7 @@ class TestAuthentication:
         with ScrapboxClient() as client:
             request = self._build_request(client, self.API_URL)
             assert PAT_HEADER not in request.headers
+            assert SERVICE_ACCOUNT_HEADER not in request.headers
             assert "cookie" not in request.headers
 
     def test_connect_sid_is_sent_as_cookie(self) -> None:
@@ -200,6 +201,39 @@ class TestAuthentication:
         with ScrapboxClient(pat="test-pat") as client:
             request = self._build_request(client, self.GYAZO_URL)
             assert PAT_HEADER not in request.headers
+
+    def test_service_account_key_is_sent_as_header(self) -> None:
+        """Test that the service account access key is sent as a header."""
+        with ScrapboxClient(service_account_key="cs_test-key") as client:
+            request = self._build_request(client, self.API_URL)
+            assert request.headers[SERVICE_ACCOUNT_HEADER] == "cs_test-key"
+            assert PAT_HEADER not in request.headers
+
+    def test_service_account_key_takes_precedence_over_connect_sid(self) -> None:
+        """Test that the cookie is dropped when a service account key is given."""
+        with ScrapboxClient(connect_sid="test-sid", service_account_key="cs_test-key") as client:
+            assert client.connect_sid is None
+            request = self._build_request(client, self.API_URL)
+            assert request.headers[SERVICE_ACCOUNT_HEADER] == "cs_test-key"
+            assert "cookie" not in request.headers
+
+    def test_pat_takes_precedence_over_service_account_key(self) -> None:
+        """Test that only one header credential is sent when both are given."""
+        with ScrapboxClient(pat="test-pat", service_account_key="cs_test-key") as client:
+            assert client.service_account_key is None
+            request = self._build_request(client, self.API_URL)
+            assert request.headers[PAT_HEADER] == "test-pat"
+            assert SERVICE_ACCOUNT_HEADER not in request.headers
+
+    def test_service_account_key_is_not_sent_to_other_hosts(self) -> None:
+        """Test that the service account key is not leaked to third-party hosts.
+
+        `get_file()` follows redirects to Gyazo and to signed storage URLs, which
+        have no business seeing a Cosense credential.
+        """
+        with ScrapboxClient(service_account_key="cs_test-key") as client:
+            request = self._build_request(client, self.GYAZO_URL)
+            assert SERVICE_ACCOUNT_HEADER not in request.headers
 
 
 class TestReadEndpoints:

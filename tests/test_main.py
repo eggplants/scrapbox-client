@@ -13,7 +13,14 @@ import pytest
 
 from scrapbox.client import MAX_PAGE_SIZE
 from scrapbox.exceptions import PersonalAccessTokenRequiredError
-from scrapbox.main import check_output_path, get_connect_sid, get_pat, main, save_credential
+from scrapbox.main import (
+    check_output_path,
+    get_connect_sid,
+    get_pat,
+    get_service_account_key,
+    main,
+    save_credential,
+)
 from scrapbox.models import (
     Commit,
     CommitsResponse,
@@ -428,6 +435,56 @@ class TestGetPat:
         assert result is None
 
 
+class TestGetServiceAccountKey:
+    """Test get_service_account_key function."""
+
+    def test_from_argument(self) -> None:
+        """Test getting the service account access key from argument."""
+        args = MagicMock()
+        args.service_account_key = "cs_arg-value"
+        args.service_account_key_file = None
+        assert get_service_account_key(args) == "cs_arg-value"
+
+    def test_from_file(self, tmp_path: Path) -> None:
+        """Test getting the service account access key from specified file."""
+        key_file = tmp_path / "test.key"
+        key_file.write_text("cs_file-value\n")
+        args = MagicMock()
+        args.service_account_key = None
+        args.service_account_key_file = str(key_file)
+        assert get_service_account_key(args) == "cs_file-value"
+
+    def test_from_default_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test getting the service account access key from default file."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        config_dir = tmp_path / ".config" / "sbc"
+        config_dir.mkdir(parents=True)
+        (config_dir / "service-account-key").write_text("cs_default-value\n")
+
+        args = MagicMock()
+        args.service_account_key = None
+        args.service_account_key_file = None
+        assert get_service_account_key(args) == "cs_default-value"
+
+    def test_from_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test getting the service account access key from the environment."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        monkeypatch.setenv("SBC_SERVICE_ACCOUNT_KEY", "cs_env-value")
+        args = MagicMock()
+        args.service_account_key = None
+        args.service_account_key_file = None
+        assert get_service_account_key(args) == "cs_env-value"
+
+    def test_none_when_no_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test returning None when no file exists."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        monkeypatch.delenv("SBC_SERVICE_ACCOUNT_KEY", raising=False)
+        args = MagicMock()
+        args.service_account_key = None
+        args.service_account_key_file = None
+        assert get_service_account_key(args) is None
+
+
 class TestConnectSidPriority:
     """Test connect.sid priority logic."""
 
@@ -439,6 +496,7 @@ class TestConnectSidPriority:
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         monkeypatch.delenv("SBC_CONNECT_SID", raising=False)
         monkeypatch.delenv("SBC_PAT", raising=False)
+        monkeypatch.delenv("SBC_SERVICE_ACCOUNT_KEY", raising=False)
 
     def test_connect_sid_from_argument(self, tmp_path: Path) -> None:
         """Test that --connect-sid argument takes priority."""
@@ -458,7 +516,7 @@ class TestConnectSidPriority:
 
             main(test_args=["--connect-sid", "arg-sid-value", "pages", self.PROJECT_NAME])
 
-            mock_client.assert_called_once_with(connect_sid="arg-sid-value", pat=None)
+            mock_client.assert_called_once_with(connect_sid="arg-sid-value", pat=None, service_account_key=None)
 
     def test_connect_sid_from_file(self, tmp_path: Path) -> None:
         """Test that --connect-sid-file is used when --connect-sid is not provided."""
@@ -478,7 +536,7 @@ class TestConnectSidPriority:
 
             main(test_args=["--connect-sid-file", str(sid_file), "pages", self.PROJECT_NAME])
 
-            mock_client.assert_called_once_with(connect_sid="file-sid-value", pat=None)
+            mock_client.assert_called_once_with(connect_sid="file-sid-value", pat=None, service_account_key=None)
 
     def test_connect_sid_from_default_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that default ~/.config/sbc/connect.sid is used when no arguments provided."""
@@ -502,7 +560,7 @@ class TestConnectSidPriority:
 
             main(test_args=["pages", self.PROJECT_NAME])
 
-            mock_client.assert_called_once_with(connect_sid="default-sid-value", pat=None)
+            mock_client.assert_called_once_with(connect_sid="default-sid-value", pat=None, service_account_key=None)
 
     def test_connect_sid_none_when_no_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that connect_sid is None when no file exists."""
@@ -521,7 +579,7 @@ class TestConnectSidPriority:
 
             main(test_args=["pages", self.PROJECT_NAME])
 
-            mock_client.assert_called_once_with(connect_sid=None, pat=None)
+            mock_client.assert_called_once_with(connect_sid=None, pat=None, service_account_key=None)
 
     def test_connect_sid_file_not_exists(self, tmp_path: Path) -> None:
         """Test that connect_sid is None when specified file doesn't exist."""
@@ -540,7 +598,7 @@ class TestConnectSidPriority:
 
             main(test_args=["--connect-sid-file", str(non_existent_file), "pages", self.PROJECT_NAME])
 
-            mock_client.assert_called_once_with(connect_sid=None, pat=None)
+            mock_client.assert_called_once_with(connect_sid=None, pat=None, service_account_key=None)
 
     def test_connect_sid_argument_priority_over_file(self) -> None:
         """Test that --connect-sid has priority over --connect-sid-file."""
@@ -561,6 +619,7 @@ class TestPatPriority:
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         monkeypatch.delenv("SBC_CONNECT_SID", raising=False)
         monkeypatch.delenv("SBC_PAT", raising=False)
+        monkeypatch.delenv("SBC_SERVICE_ACCOUNT_KEY", raising=False)
 
     def _mock_client(self) -> MagicMock:
         """Build a patched ScrapboxClient returning an empty page list."""
@@ -582,7 +641,7 @@ class TestPatPriority:
         with patch("scrapbox.main.ScrapboxClient", mock_client):
             main(test_args=["--pat", "arg-pat-value", "pages", self.PROJECT_NAME])
 
-            mock_client.assert_called_once_with(connect_sid=None, pat="arg-pat-value")
+            mock_client.assert_called_once_with(connect_sid=None, pat="arg-pat-value", service_account_key=None)
 
     def test_pat_from_file(self, tmp_path: Path) -> None:
         """Test that --pat-file is used when --pat is not provided."""
@@ -593,7 +652,7 @@ class TestPatPriority:
         with patch("scrapbox.main.ScrapboxClient", mock_client):
             main(test_args=["--pat-file", str(pat_file), "pages", self.PROJECT_NAME])
 
-            mock_client.assert_called_once_with(connect_sid=None, pat="file-pat-value")
+            mock_client.assert_called_once_with(connect_sid=None, pat="file-pat-value", service_account_key=None)
 
     def test_pat_from_default_file(self, tmp_path: Path) -> None:
         """Test that default ~/.config/sbc/pat is used when no arguments provided."""
@@ -605,7 +664,7 @@ class TestPatPriority:
         with patch("scrapbox.main.ScrapboxClient", mock_client):
             main(test_args=["pages", self.PROJECT_NAME])
 
-            mock_client.assert_called_once_with(connect_sid=None, pat="default-pat-value")
+            mock_client.assert_called_once_with(connect_sid=None, pat="default-pat-value", service_account_key=None)
 
     def test_pat_and_connect_sid_are_both_passed(self) -> None:
         """Test that both credentials reach the client, which resolves the precedence."""
@@ -613,12 +672,67 @@ class TestPatPriority:
         with patch("scrapbox.main.ScrapboxClient", mock_client):
             main(test_args=["--connect-sid", "sid-value", "--pat", "pat-value", "pages", self.PROJECT_NAME])
 
-            mock_client.assert_called_once_with(connect_sid="sid-value", pat="pat-value")
+            mock_client.assert_called_once_with(connect_sid="sid-value", pat="pat-value", service_account_key=None)
 
     def test_pat_argument_priority_over_file(self) -> None:
         """Test that --pat and --pat-file are mutually exclusive."""
         with pytest.raises(SystemExit):
             main(test_args=["--pat", "arg-value", "--pat-file", "file-path", "pages", self.PROJECT_NAME])
+
+    def test_service_account_key_from_argument(self) -> None:
+        """Test that --service-account-key is passed to the client."""
+        mock_client = self._mock_client()
+        with patch("scrapbox.main.ScrapboxClient", mock_client):
+            main(test_args=["--service-account-key", "cs_arg-value", "pages", self.PROJECT_NAME])
+
+            mock_client.assert_called_once_with(connect_sid=None, pat=None, service_account_key="cs_arg-value")
+
+    def test_service_account_key_from_default_file(self, tmp_path: Path) -> None:
+        """Test that the default ~/.config/sbc/service-account-key file is used."""
+        config_dir = tmp_path / ".config" / "sbc"
+        config_dir.mkdir(parents=True)
+        (config_dir / "service-account-key").write_text("cs_default-value\n")
+
+        mock_client = self._mock_client()
+        with patch("scrapbox.main.ScrapboxClient", mock_client):
+            main(test_args=["pages", self.PROJECT_NAME])
+
+            mock_client.assert_called_once_with(connect_sid=None, pat=None, service_account_key="cs_default-value")
+
+    def test_every_credential_reaches_the_client(self) -> None:
+        """Test that the CLI resolves each source and leaves the precedence to the client."""
+        mock_client = self._mock_client()
+        with patch("scrapbox.main.ScrapboxClient", mock_client):
+            main(
+                test_args=[
+                    "--connect-sid",
+                    "sid-value",
+                    "--pat",
+                    "pat-value",
+                    "--service-account-key",
+                    "cs_key-value",
+                    "pages",
+                    self.PROJECT_NAME,
+                ]
+            )
+
+            mock_client.assert_called_once_with(
+                connect_sid="sid-value", pat="pat-value", service_account_key="cs_key-value"
+            )
+
+    def test_service_account_key_argument_priority_over_file(self) -> None:
+        """Test that --service-account-key and --service-account-key-file are exclusive."""
+        with pytest.raises(SystemExit):
+            main(
+                test_args=[
+                    "--service-account-key",
+                    "cs_arg-value",
+                    "--service-account-key-file",
+                    "file-path",
+                    "pages",
+                    self.PROJECT_NAME,
+                ]
+            )
 
 
 class TestLogin:
@@ -649,6 +763,14 @@ class TestLogin:
         assert main(test_args=["login"]) == 0
         assert (tmp_path / ".config" / "sbc" / "connect.sid").read_text() == "s%3Aabc123\n"
         assert not (tmp_path / ".config" / "sbc" / "pat").exists()
+
+    def test_save_service_account_key(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that a cs_ credential is saved to the service account key file."""
+        self._set_stdin(monkeypatch, "cs_abc123\n")
+        assert main(test_args=["login"]) == 0
+        assert (tmp_path / ".config" / "sbc" / "service-account-key").read_text() == "cs_abc123\n"
+        assert not (tmp_path / ".config" / "sbc" / "pat").exists()
+        assert not (tmp_path / ".config" / "sbc" / "connect.sid").exists()
 
     def test_saved_credential_is_read_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that a saved credential is picked up by the credential lookup."""
@@ -717,7 +839,7 @@ class TestLogin:
 
         mock_client.assert_not_called()
 
-    @pytest.mark.parametrize("credential", ["pat_abc123", "s%3Aabc123"])
+    @pytest.mark.parametrize("credential", ["pat_abc123", "s%3Aabc123", "cs_abc123"])
     def test_save_credential_returns_path(self, tmp_path: Path, credential: str) -> None:
         """Test that save_credential returns the file it wrote to."""
         path = save_credential(credential)
@@ -987,15 +1109,28 @@ class TestAuthenticatedCommands:
 
     def test_edit_submit_command(self, client: MagicMock, capfd: pytest.CaptureFixture[str]) -> None:
         """Test edit-submit command."""
-        client.submit_page_edit.return_value = EditSubmitResponse(commit_id="c1", page=SubmittedPage(title="a b"))
+        client.submit_page_edit.return_value = EditSubmitResponse(
+            commit_id="c1", page=SubmittedPage(id="6a78192b3a6ddc39bdf42b47", title="a b")
+        )
 
         exit_code = main(test_args=["edit-submit", "my-project", "p1"])
 
         assert exit_code == 0
         captured = capfd.readouterr()
         assert "commitId: c1" in captured.out
+        # The id is how a page the edit created can be reached afterwards.
+        assert "pageId:   6a78192b3a6ddc39bdf42b47" in captured.out
         # The title is percent-encoded back into a URL.
         assert "url:      https://scrapbox.io/my-project/a_b" in captured.out
+
+    def test_edit_submit_command_without_a_page_id(self, client: MagicMock, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test that a submit response naming no id simply omits the line."""
+        client.submit_page_edit.return_value = EditSubmitResponse(commit_id="c1", page=SubmittedPage(title="a b"))
+
+        assert main(test_args=["edit-submit", "my-project", "p1"]) == 0
+        captured = capfd.readouterr()
+        assert "commitId: c1" in captured.out
+        assert "pageId:" not in captured.out
 
     def test_edit_without_pat_is_reported(
         self,

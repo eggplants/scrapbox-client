@@ -6,20 +6,24 @@ class ScrapboxError(Exception):
 
 
 class PersonalAccessTokenRequiredError(ScrapboxError):
-    """Raised when an endpoint that only accepts a personal access token is called without one.
+    """Raised when a write endpoint is called without a credential it accepts.
 
     The page editing endpoints (`page-edit-for-ai/preview` and
     `page-edit-for-ai/submit`) reject `connect.sid` cookie authentication with
-    HTTP 403, so the client refuses to send the request in the first place.
+    HTTP 403, so the client refuses to send the request in the first place. They do
+    accept a service account access key, which writes as the service account.
     """
 
     def __init__(self, endpoint: str) -> None:
         """Initialize the error.
 
         Args:
-            endpoint: Path of the endpoint that requires a personal access token.
+            endpoint: Path of the endpoint that needs a header credential.
         """
-        super().__init__(f"{endpoint} is only available via a personal access token. Pass pat= to ScrapboxClient.")
+        super().__init__(
+            f"{endpoint} needs a personal access token or a service account access key. "
+            f"Pass pat= or service_account_key= to ScrapboxClient."
+        )
         self.endpoint = endpoint
 
 

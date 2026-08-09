@@ -35,8 +35,11 @@ if TYPE_CHECKING:
 PAT_HEADER = "x-personal-access-token"
 """Header carrying the personal access token."""
 
+SERVICE_ACCOUNT_HEADER = "x-service-account-access-key"
+"""Header carrying the service account access key."""
+
 SCRAPBOX_HOST = "scrapbox.io"
-"""Host the personal access token may be sent to."""
+"""Host a header credential may be sent to."""
 
 SCRAPBOX_ORIGIN = f"https://{SCRAPBOX_HOST}"
 """Origin every URL is built from."""
@@ -123,41 +126,55 @@ class ScrapboxClient:
         self,
         connect_sid: str | None = None,
         pat: str | None = None,
+        service_account_key: str | None = None,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         """Initialize the Scrapbox API client.
 
-        Authentication is optional for public projects. When both credentials are
-        given, the personal access token is used and the cookie is not sent.
+        Authentication is optional for public projects. Only one credential is ever
+        sent: given more than one, a personal access token wins over a service
+        account key, which in turn wins over a cookie.
 
         Args:
             connect_sid: Scrapbox authentication cookie (connect.sid).
             pat: Scrapbox personal access token, sent as the `x-personal-access-token`
-                header. Takes precedence over `connect_sid`.
+                header.
+            service_account_key: Access key of a service account, sent as the
+                `x-service-account-access-key` header. A service account is registered
+                on one project of a Business plan and can read and write only that
+                one: any other project, even a public one, answers 400. It stands for
+                no user, so `get_me` and `get_projects` are out of its reach, and
+                `get_project` refuses it as well.
             transport: Transport used by the underlying HTTP client. Intended for
                 tests, which pass an `httpx.MockTransport` so that header handling
                 is still exercised.
         """
         self.pat = pat
-        self.connect_sid = None if pat else connect_sid
+        self.service_account_key = None if pat else service_account_key
+        self.connect_sid = None if pat or service_account_key else connect_sid
         self.client = httpx.Client(
             cookies={"connect.sid": self.connect_sid} if self.connect_sid else None,
             follow_redirects=True,
             transport=transport,
         )
-        if pat:
-            # Attach the token per request instead of as a default header: get_file()
-            # follows redirects to third-party hosts (Gyazo), which must not receive it.
-            self.client.event_hooks["request"].append(self._attach_pat)
+        if self.pat or self.service_account_key:
+            # Attach the credential per request instead of as a default header:
+            # get_file() follows redirects to third-party hosts (Gyazo), which must
+            # not receive it.
+            self.client.event_hooks["request"].append(self._attach_credential)
 
-    def _attach_pat(self, request: httpx.Request) -> None:
-        """Attach the personal access token to requests sent to Scrapbox.
+    def _attach_credential(self, request: httpx.Request) -> None:
+        """Attach the header credential to requests sent to Scrapbox.
 
         Args:
             request: The outgoing request.
         """
-        if self.pat and request.url.host == SCRAPBOX_HOST:
+        if request.url.host != SCRAPBOX_HOST:
+            return
+        if self.pat:
             request.headers[PAT_HEADER] = self.pat
+        elif self.service_account_key:
+            request.headers[SERVICE_ACCOUNT_HEADER] = self.service_account_key
 
     def __enter__(self: Self) -> Self:
         """Enter the runtime context related to this object."""
@@ -172,8 +189,37 @@ class ScrapboxClient:
         self.client.close()
 
     @staticmethod
-    def _raise_for_status(response: httpx.Response) -> None:
+    def _error_detail(response: httpx.Response) -> str | None:
+        """Read the explanation the API put in an error body.
+
+        Most of `/api/` answers `{"name": ..., "message": ...}`; the oEmbed proxy and
+        the edit endpoints answer with `message` alone.
+
+        Args:
+            response: The error response to read.
+
+        Returns:
+            The explanation, or None if the body carries none.
+        """
+        try:
+            body = response.json()
+        except ValueError:
+            return None
+        if not isinstance(body, dict):
+            return None
+        message = body.get("message") or body.get("error")
+        if not message:
+            return None
+        name = body.get("name")
+        return f"{name}: {message}" if name else str(message)
+
+    @classmethod
+    def _raise_for_status(cls, response: httpx.Response) -> None:
         """Turn an error response into an exception.
+
+        The status code alone rarely says what went wrong -- a service account asked
+        for the wrong project gets a bare 400 -- so the API's own explanation is
+        carried into the error message.
 
         Args:
             response: The response to inspect.
@@ -183,12 +229,20 @@ class ScrapboxClient:
             httpx.HTTPStatusError: If the response carries any other error status.
         """
         if response.status_code == SearchServerUpdatingError.STATUS_CODE:
+            # The name adds nothing here: the exception class already carries it.
             try:
                 message = response.json().get("message")
             except ValueError:
                 message = None
             raise SearchServerUpdatingError(message)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            detail = cls._error_detail(response)
+            if detail is None:
+                raise
+            msg = f"{e}\n{detail}"
+            raise httpx.HTTPStatusError(msg, request=e.request, response=e.response) from None
 
     def _get(self, path: str, params: Mapping[str, Any] | None = None) -> httpx.Response:
         """Send a GET request to a path under `BASE_URL`.
@@ -219,8 +273,9 @@ class ScrapboxClient:
     def _post_json(self, path: str, payload: Mapping[str, Any]) -> Any:  # noqa: ANN401
         """Send a POST request and decode the JSON body.
 
-        Write endpoints only accept a personal access token: authenticating with a
-        cookie is refused with HTTP 403, so the request is not even sent without one.
+        Write endpoints take a header credential -- a personal access token or a
+        service account access key -- and refuse a cookie with HTTP 403, so the
+        request is not even sent without one.
 
         Args:
             path: Path below `BASE_URL`, starting with a slash.
@@ -230,9 +285,10 @@ class ScrapboxClient:
             The decoded JSON body.
 
         Raises:
-            PersonalAccessTokenRequiredError: If no personal access token is set.
+            PersonalAccessTokenRequiredError: If neither a personal access token nor a
+                service account access key is set.
         """
-        if not self.pat:
+        if not (self.pat or self.service_account_key):
             raise PersonalAccessTokenRequiredError(path)
         response = self.client.post(f"{self.BASE_URL}{path}", json=dict(payload))
         self._raise_for_status(response)
@@ -617,6 +673,9 @@ class ScrapboxClient:
         Unlike `get_projects`, this needs no authentication for a public project, and
         carries the project's settings and member list rather than the counters.
 
+        A service account is refused here with HTTP 401, even for the project it
+        belongs to, though `get_project_users` on that same project works.
+
         Args:
             project_name: The name of the project.
 
@@ -676,7 +735,8 @@ class ScrapboxClient:
             EditPreviewResponse: The preview id and the resulting page.
 
         Raises:
-            PersonalAccessTokenRequiredError: If no personal access token is set.
+            PersonalAccessTokenRequiredError: If neither a personal access token nor a
+                service account access key is set.
         """
         payload: dict[str, Any] = {
             "changes": [
@@ -704,7 +764,8 @@ class ScrapboxClient:
             EditSubmitResponse: The created commit and the page written to.
 
         Raises:
-            PersonalAccessTokenRequiredError: If no personal access token is set.
+            PersonalAccessTokenRequiredError: If neither a personal access token nor a
+                service account access key is set.
         """
         return EditSubmitResponse.model_validate(
             self._post_json(f"/pages/v2/{project_name}/page-edit-for-ai/submit", {"previewId": preview_id})
