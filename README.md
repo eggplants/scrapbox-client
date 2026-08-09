@@ -16,9 +16,9 @@ A client for [Scrapbox (Helpfeel Cosense)](https://scrapbox.io/product)
 
 ## Documentation
 
-- `scrapbox-client` Python API Documentation: <https://egpl.dev/scrapbox-client/scrapbox.html>
-- Cosense HTTP API Unofficial Documentation: <https://egpl.dev/scrapbox-client/api/>
-- Cosense HTTP API Unofficial OpenAPI Spec: <https://egpl.dev/scrapbox-client/openapi.yaml>
+- [`scrapbox-client` Python API Documentation](https://egpl.dev/scrapbox-client/scrapbox.html)
+- [Cosense HTTP API Unofficial Documentation](https://egpl.dev/scrapbox-client/api/)
+- [Cosense HTTP API Unofficial OpenAPI Spec](https://egpl.dev/scrapbox-client/openapi.yaml)
 
 ## Install
 

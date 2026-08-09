@@ -16,9 +16,9 @@ English version: [README.md](README.md)
 
 ## ドキュメント
 
-- `scrapbox-client` Python API ドキュメント: <https://egpl.dev/scrapbox-client/scrapbox.html>
-- Cosense HTTP API 非公式ドキュメント: <https://egpl.dev/scrapbox-client/api/>
-- Cosense HTTP API 非公式 OpenAPI Spec: <https://egpl.dev/scrapbox-client/openapi.yaml>
+- [`scrapbox-client` Python API ドキュメント](https://egpl.dev/scrapbox-client/scrapbox.html)
+- [Cosense HTTP API 非公式ドキュメント](https://egpl.dev/scrapbox-client/api/)
+- [Cosense HTTP API 非公式 OpenAPI Spec](https://egpl.dev/scrapbox-client/openapi.yaml)
 
 ## インストール
 
