@@ -4,15 +4,32 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import stat
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from scrapbox.client import MAX_PAGE_SIZE
+from scrapbox.exceptions import PersonalAccessTokenRequiredError
 from scrapbox.main import check_output_path, get_connect_sid, get_pat, main, save_credential
+from scrapbox.models import (
+    Commit,
+    CommitsResponse,
+    EditPreviewResponse,
+    EditSubmitResponse,
+    FileInfo,
+    Me,
+    PagePreview,
+    PreviewLine,
+    Project,
+    ProjectsResponse,
+    SubmittedPage,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 ARGPARSE_ERROR_CODE = 2
@@ -341,8 +358,13 @@ class TestGetConnectSid:
         result = get_connect_sid(args)
         assert result is None
 
-    def test_file_not_exists(self, tmp_path: Path) -> None:
+    def test_file_not_exists(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test when specified file doesn't exist."""
+        # Isolate the home directory and the environment: without this the lookup falls
+        # back to the real ~/.config/sbc/connect.sid and the test fails on a machine
+        # where a credential has actually been saved.
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        monkeypatch.delenv("SBC_CONNECT_SID", raising=False)
         non_existent_file = tmp_path / "non_existent.sid"
         args = MagicMock()
         args.connect_sid = None
@@ -701,3 +723,291 @@ class TestLogin:
         path = save_credential(credential)
         assert path.parent == tmp_path / ".config" / "sbc"
         assert path.read_text() == f"{credential}\n"
+
+
+class TestReadCommands:
+    """Test the commands that read from a public project."""
+
+    PROJECT_NAME = "help-jp"
+    PAGE_TITLE = "ブラケティング"
+
+    def test_page_v2_command(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test page-v2 command."""
+        exit_code = main(test_args=["page-v2", self.PROJECT_NAME, self.PAGE_TITLE])
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert f"Title: {self.PAGE_TITLE}" in captured.out
+        assert not captured.err
+
+    def test_page_v2_command_json(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test page-v2 command with JSON output."""
+        exit_code = main(test_args=["page-v2", self.PROJECT_NAME, self.PAGE_TITLE, "--json"])
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert '"linksLc"' in captured.out
+        assert not captured.err
+
+    def test_links_command(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test links command."""
+        exit_code = main(test_args=["links", self.PROJECT_NAME, self.PAGE_TITLE])
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert "1 hop links:" in captured.out
+        assert not captured.err
+
+    def test_links_command_two_hops(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test links command for the 2-hop neighbourhood."""
+        exit_code = main(test_args=["links", self.PROJECT_NAME, self.PAGE_TITLE, "--hop", "2", "--json"])
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert '"links2hop"' in captured.out
+
+    def test_links_command_all(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test that --all walks the cursor and finds the whole neighbourhood."""
+        one_page = main(test_args=["links", self.PROJECT_NAME, self.PAGE_TITLE])
+        assert one_page == 0
+        expected = capfd.readouterr().out
+
+        exit_code = main(test_args=["links", self.PROJECT_NAME, self.PAGE_TITLE, "--all", "--per-page", "2"])
+
+        assert exit_code == 0
+        assert capfd.readouterr().out == expected
+
+    def test_links_command_all_json(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test that --all keeps the JSON output keyed by hop."""
+        exit_code = main(test_args=["links", self.PROJECT_NAME, self.PAGE_TITLE, "--all", "--per-page", "2", "--json"])
+
+        assert exit_code == 0
+        payload = json.loads(capfd.readouterr().out)
+        assert list(payload) == ["links1hop"]
+        assert all(entry["title"] for entry in payload["links1hop"])
+
+    def test_links_command_all_two_hops_json(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test that --all keys the 2-hop output by its own hop."""
+        exit_code = main(
+            test_args=["links", self.PROJECT_NAME, self.PAGE_TITLE, "--hop", "2", "--all", "--per-page", "2", "--json"]
+        )
+
+        assert exit_code == 0
+        assert list(json.loads(capfd.readouterr().out)) == ["links2hop"]
+
+    def test_project_command(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test project command."""
+        exit_code = main(test_args=["project", self.PROJECT_NAME])
+
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert f"name:        {self.PROJECT_NAME}" in captured.out
+        assert "visibility:  public" in captured.out
+        assert not captured.err
+
+    def test_project_command_json(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test project command with JSON output."""
+        exit_code = main(test_args=["project", self.PROJECT_NAME, "--json"])
+
+        assert exit_code == 0
+        payload = json.loads(capfd.readouterr().out)
+        assert payload["name"] == self.PROJECT_NAME
+        assert payload["users"]
+
+    def test_project_command_unknown_project(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test that an unknown project name exits non-zero."""
+        exit_code = main(test_args=["project", "this-project-definitely-does-not-exist-12345"])
+
+        assert exit_code == 1
+        assert "Error:" in capfd.readouterr().err
+
+    def test_search_command(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test search command."""
+        exit_code = main(test_args=["search", self.PROJECT_NAME, "リンク"])
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert "hits for" in captured.out
+        assert not captured.err
+
+    def test_search_command_json(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test search command with JSON output."""
+        exit_code = main(test_args=["search", self.PROJECT_NAME, "リンク", "--or", "--sort", "updated", "--json"])
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert '"searchQuery"' in captured.out
+
+    def test_members_command(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test members command."""
+        exit_code = main(test_args=["members", self.PROJECT_NAME])
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert captured.out.startswith("- ")
+        assert not captured.err
+
+    def test_pages_command_with_sort(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test pages command with an explicit sort order."""
+        exit_code = main(test_args=["pages", self.PROJECT_NAME, "--sort", "title", "--limit", "3"])
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert "Project:" in captured.out
+
+    def test_pages_command_rejects_unknown_sort(self) -> None:
+        """Test that an unknown sort order is refused by the parser."""
+        with pytest.raises(SystemExit) as e:
+            main(test_args=["pages", self.PROJECT_NAME, "--sort", "nonsense"])
+        assert e.value.code == ARGPARSE_ERROR_CODE
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["pages", PROJECT_NAME, "--limit", "1001"],
+            ["pages", PROJECT_NAME, "--limit", "0"],
+            ["pages", PROJECT_NAME, "--limit", "-1"],
+            ["pages", PROJECT_NAME, "--limit", "abc"],
+            ["all-pages", PROJECT_NAME, "--batch-size", "1001"],
+            ["links", PROJECT_NAME, PAGE_TITLE, "--per-page", "1001"],
+        ],
+    )
+    def test_page_size_out_of_range_is_refused(self, args: list[str], capfd: pytest.CaptureFixture[str]) -> None:
+        """Test that a page size the API would silently replace is refused."""
+        with pytest.raises(SystemExit) as e:
+            main(test_args=args)
+
+        assert e.value.code == ARGPARSE_ERROR_CODE
+        assert "must be" in capfd.readouterr().err
+
+    def test_pages_command_accepts_the_largest_page_size(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test that the largest accepted page size still goes through."""
+        exit_code = main(test_args=["pages", self.PROJECT_NAME, "--limit", str(MAX_PAGE_SIZE)])
+
+        assert exit_code == 0
+        assert "Project:" in capfd.readouterr().out
+
+
+class TestAuthenticatedCommands:
+    """Test the commands that need a credential, against a mocked client."""
+
+    @pytest.fixture
+    def client(self) -> Iterator[MagicMock]:
+        """Replace the client the CLI builds with a mock.
+
+        These commands need a credential, so the real API is never called here.
+        """
+        with patch("scrapbox.main.ScrapboxClient") as mock_class:
+            instance = MagicMock()
+            mock_class.return_value.__enter__.return_value = instance
+            yield instance
+
+    def test_whoami_command(self, client: MagicMock, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test whoami command."""
+        client.get_me.return_value = Me(id="abc", name="shokai", display_name="Sho", email="s@example.com")
+
+        exit_code = main(test_args=["whoami"])
+
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert "name:        shokai" in captured.out
+        assert "s@example.com" in captured.out
+
+    def test_projects_command(self, client: MagicMock, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test projects command."""
+        client.get_projects.return_value = ProjectsResponse(
+            projects=[Project(id="1", name="my-project", display_name="Mine", public_visible=False, users_count=3)]
+        )
+
+        exit_code = main(test_args=["projects"])
+
+        assert exit_code == 0
+        assert "- my-project (Mine, private, users: 3)" in capfd.readouterr().out
+
+    def test_commits_command(self, client: MagicMock, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test commits command."""
+        client.get_commits.return_value = CommitsResponse(
+            commits=[Commit(id="c1", user_id="u1", created=1, changes=[{"linesCount": 1}])]
+        )
+
+        exit_code = main(test_args=["commits", "my-project", "page-id", "--since", "c0"])
+
+        assert exit_code == 0
+        assert "1 commits" in capfd.readouterr().out
+        client.get_commits.assert_called_once_with("my-project", "page-id", since="c0")
+
+    def test_file_info_command(self, client: MagicMock, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test file-info command."""
+        client.get_file_info.return_value = FileInfo(
+            id="f1",
+            project_name="my-project",
+            originalname="a.png",
+            content_type="image/png",
+            size=10,
+            text="ocr",
+        )
+
+        exit_code = main(test_args=["file-info", "f1.png"])
+
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert "contentType: image/png" in captured.out
+        assert "ocr" in captured.out
+
+    def test_edit_preview_command(
+        self,
+        client: MagicMock,
+        capfd: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test edit-preview command reading ops from stdin."""
+        monkeypatch.setattr("sys.stdin", io.StringIO('{"ops":[{"insertBefore":"_end","text":"hello"}]}'))
+        client.preview_page_edit.return_value = EditPreviewResponse(
+            preview_id="p1",
+            expire_at="2026-08-09T06:47:53.590Z",
+            page_preview=PagePreview(title="test", persistent=True, lines=[PreviewLine(id="l1", text="hello")]),
+        )
+
+        exit_code = main(test_args=["edit-preview", "my-project", "--page-id", "pid"])
+
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert "previewId: p1" in captured.out
+        assert "status:    update" in captured.out
+        # The ops were turned into changes and the page id passed through.
+        _, kwargs = client.preview_page_edit.call_args
+        assert kwargs["page_id"] == "pid"
+
+    def test_edit_preview_rejects_empty_input(
+        self,
+        client: MagicMock,
+        capfd: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test that edit-preview fails when nothing is piped in."""
+        monkeypatch.setattr("sys.stdin", io.StringIO(""))
+
+        exit_code = main(test_args=["edit-preview", "my-project"])
+
+        assert exit_code == 1
+        assert "is empty" in capfd.readouterr().err
+        client.preview_page_edit.assert_not_called()
+
+    def test_edit_submit_command(self, client: MagicMock, capfd: pytest.CaptureFixture[str]) -> None:
+        """Test edit-submit command."""
+        client.submit_page_edit.return_value = EditSubmitResponse(commit_id="c1", page=SubmittedPage(title="a b"))
+
+        exit_code = main(test_args=["edit-submit", "my-project", "p1"])
+
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert "commitId: c1" in captured.out
+        # The title is percent-encoded back into a URL.
+        assert "url:      https://scrapbox.io/my-project/a_b" in captured.out
+
+    def test_edit_without_pat_is_reported(
+        self,
+        client: MagicMock,
+        capfd: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test that the personal-access-token-only error reaches the user."""
+        monkeypatch.setattr("sys.stdin", io.StringIO('{"ops":[]}'))
+        client.preview_page_edit.side_effect = PersonalAccessTokenRequiredError("/preview")
+
+        exit_code = main(test_args=["edit-preview", "my-project"])
+
+        assert exit_code == 1
+        assert "personal access token" in capfd.readouterr().err

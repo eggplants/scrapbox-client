@@ -7,7 +7,52 @@ from scrapbox.models import (
     GyazoOEmbedResponse,
     GyazoOEmbedResponsePhoto,
     GyazoOEmbedResponseVideo,
+    PageDetail,
 )
+
+
+class TestPageDetail:
+    """Test PageDetail model."""
+
+    def test_page_without_substance_omits_its_counts(self) -> None:
+        """Test parsing a page that only exists as a link target.
+
+        The API answers 200 for one of these and drops `commitId`, `linesCount` and
+        `charsCount` from the response rather than sending them as null, so parsing
+        must not depend on them.
+        """
+        data = {
+            "id": "6a7834ec4dae1dc2de75f92d",
+            "title": "リンク",
+            "image": None,
+            "descriptions": [],
+            "user": {"id": "5724627723541f110097c291"},
+            "pin": 0,
+            "views": 0,
+            "linked": 8,
+            "created": 1786291436,
+            "updated": 1786291436,
+            "accessed": 1786291436,
+            "lastAccessed": None,
+            "snapshotCreated": None,
+            "pageRank": 0,
+            "helpfeels": [],
+            "persistent": False,
+            "lines": [
+                {
+                    "id": "6a7834ec4dae1dc2de75f92e",
+                    "text": "リンク",
+                    "userId": "5724627723541f110097c291",
+                    "created": 1786291436,
+                    "updated": 1786291436,
+                }
+            ],
+        }
+        page = PageDetail.model_validate(data)
+        assert not page.persistent
+        assert page.commit_id is None
+        assert page.lines_count is None
+        assert page.chars_count is None
 
 
 class TestGyazoOEmbedResponsePhoto:

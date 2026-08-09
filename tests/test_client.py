@@ -1,13 +1,10 @@
 """Tests for Scrapbox client."""
 
-from typing import TYPE_CHECKING
-
+import httpx
 import pytest
 
 from scrapbox.client import PAT_HEADER, ScrapboxClient
-
-if TYPE_CHECKING:
-    import httpx
+from scrapbox.exceptions import SearchServerUpdatingError
 
 
 class TestScrapboxClient:
@@ -57,7 +54,10 @@ class TestScrapboxClient:
 
             assert page.title == self.PAGE_TITLE
             assert page.id is not None
+            # A page with substance carries its counts; one without leaves them out.
+            assert page.lines_count is not None
             assert page.lines_count > 0
+            assert page.chars_count is not None
             assert page.chars_count > 0
             assert hasattr(page, "created")
             assert hasattr(page, "updated")
@@ -200,3 +200,210 @@ class TestAuthentication:
         with ScrapboxClient(pat="test-pat") as client:
             request = self._build_request(client, self.GYAZO_URL)
             assert PAT_HEADER not in request.headers
+
+
+class TestReadEndpoints:
+    """Test the read-only endpoints against a public project.
+
+    These endpoints answer without authentication, so they are exercised for real
+    rather than mocked. The ones that do need a credential live in
+    `test_client_mock.py`.
+    """
+
+    PROJECT_NAME = "help-jp"
+    PAGE_TITLE = "ブラケティング"
+    LINKED_ONLY_TITLE = "リンク"
+    """A title other pages link to, with no page of its own behind it."""
+
+    def test_get_page_without_substance(self) -> None:
+        """Test a page that only exists as a link target.
+
+        The API answers 200 rather than 404 for one of these, and leaves
+        `commitId`, `linesCount` and `charsCount` out of the response entirely
+        instead of sending them as null.
+        """
+        with ScrapboxClient() as client:
+            page = client.get_page(self.PROJECT_NAME, self.LINKED_ONLY_TITLE)
+
+        if page.persistent:
+            pytest.skip(f"{self.LINKED_ONLY_TITLE} is now a real page")
+
+        assert page.commit_id is None
+        assert page.lines_count is None
+        assert page.chars_count is None
+
+    def test_get_page_v2(self) -> None:
+        """Test getting page details from the v2 endpoint."""
+        with ScrapboxClient() as client:
+            page = client.get_page_v2(self.PROJECT_NAME, self.PAGE_TITLE)
+
+            assert page.title == self.PAGE_TITLE
+            assert page.persistent
+            assert len(page.lines) > 0
+            # The normalized variants are what v2 adds over v1.
+            assert page.links_lc == [link.replace(" ", "_").lower() for link in page.links]
+
+    def test_get_links_1hop(self) -> None:
+        """Test getting the 1-hop neighbourhood of a page."""
+        with ScrapboxClient() as client:
+            result = client.get_links_1hop(self.PROJECT_NAME, self.PAGE_TITLE)
+
+            assert len(result.links1hop) > 0
+            assert result.pagination is not None
+            assert all(page.title for page in result.links1hop)
+
+    def test_get_links_1hop_with_search(self) -> None:
+        """Test that a search query narrows the 1-hop neighbourhood."""
+        with ScrapboxClient() as client:
+            everything = client.get_links_1hop(self.PROJECT_NAME, self.PAGE_TITLE)
+            filtered = client.get_links_1hop(self.PROJECT_NAME, self.PAGE_TITLE, search="リンク")
+
+            assert len(filtered.links1hop) <= len(everything.links1hop)
+
+    def test_get_links_2hop(self) -> None:
+        """Test getting the 2-hop neighbourhood of a page."""
+        with ScrapboxClient() as client:
+            result = client.get_links_2hop(self.PROJECT_NAME, self.PAGE_TITLE)
+
+            assert result.pagination is not None
+            assert all(page.title for page in result.links2hop)
+
+    def test_get_links_paginates(self) -> None:
+        """Test that a page size and a cursor reach the API."""
+        per_page = 2
+        with ScrapboxClient() as client:
+            first = client.get_links_1hop(self.PROJECT_NAME, self.PAGE_TITLE, per_page=per_page)
+
+            assert first.pagination is not None
+            assert first.pagination.per_page == per_page
+            assert len(first.links1hop) <= per_page
+            assert first.pagination.has_next
+            assert first.pagination.next_id is not None
+
+            second = client.get_links_1hop(
+                self.PROJECT_NAME, self.PAGE_TITLE, per_page=per_page, next_id=first.pagination.next_id
+            )
+
+            # The cursor moves past the entries already seen.
+            assert {page.id for page in first.links1hop}.isdisjoint(page.id for page in second.links1hop)
+
+    def test_iter_links_1hop_matches_a_single_page(self) -> None:
+        """Test that walking the cursor yields the same neighbourhood in one go.
+
+        The page used here has few enough neighbours to fit in one default response,
+        so a small `per_page` is what forces the walk over several requests.
+        """
+        with ScrapboxClient() as client:
+            single = client.get_links_1hop(self.PROJECT_NAME, self.PAGE_TITLE)
+            walked = list(client.iter_links_1hop(self.PROJECT_NAME, self.PAGE_TITLE, per_page=2))
+
+            assert [page.id for page in walked] == [page.id for page in single.links1hop]
+            assert len({page.id for page in walked}) == len(walked)
+
+    def test_iter_links_2hop_matches_a_single_page(self) -> None:
+        """Test the same for the 2-hop neighbourhood."""
+        with ScrapboxClient() as client:
+            single = client.get_links_2hop(self.PROJECT_NAME, self.PAGE_TITLE)
+            walked = list(client.iter_links_2hop(self.PROJECT_NAME, self.PAGE_TITLE, per_page=2))
+
+            assert [page.id for page in walked] == [page.id for page in single.links2hop]
+
+    def test_iter_links_with_search(self) -> None:
+        """Test that a search narrows the walk without ending it early.
+
+        The API filters within a page rather than across the neighbourhood, so an
+        intermediate page can come back empty while entries remain.
+        """
+        with ScrapboxClient() as client:
+            everything = list(client.iter_links_1hop(self.PROJECT_NAME, self.PAGE_TITLE, per_page=2))
+            filtered = list(client.iter_links_1hop(self.PROJECT_NAME, self.PAGE_TITLE, "リンク", per_page=2))
+
+            assert len(filtered) <= len(everything)
+            assert {page.id for page in filtered} <= {page.id for page in everything}
+
+    def test_search_pages(self) -> None:
+        """Test searching the full text of a project."""
+        with ScrapboxClient() as client:
+            result = client.search_pages(self.PROJECT_NAME, "リンク")
+
+            assert result.project_name == self.PROJECT_NAME
+            assert result.count is not None
+            assert result.count > 0
+            assert all(page.title for page in result.pages)
+
+    def test_search_pages_keeps_the_thumbnail(self) -> None:
+        """Test that the thumbnail of a search hit survives model validation."""
+        with ScrapboxClient() as client:
+            result = client.search_pages(self.PROJECT_NAME, "リンク")
+
+            with_image = [page for page in result.pages if page.image]
+            assert with_image
+            assert with_image[0].model_dump(by_alias=True)["image"] == with_image[0].image
+
+    def test_get_project(self) -> None:
+        """Test getting a single project by name."""
+        with ScrapboxClient() as client:
+            project = client.get_project(self.PROJECT_NAME)
+
+            assert project.name == self.PROJECT_NAME
+            assert project.public_visible
+            assert project.display_name
+            assert project.users
+            assert all(member.id for member in project.users)
+
+    def test_get_project_not_found(self) -> None:
+        """Test that an unknown project name is an error."""
+        with ScrapboxClient() as client, pytest.raises(httpx.HTTPStatusError):
+            client.get_project("this-project-definitely-does-not-exist-12345")
+
+    def test_search_pages_match_any(self) -> None:
+        """Test that matching any word finds at least as much as matching all."""
+        with ScrapboxClient() as client:
+            all_words = client.search_pages(self.PROJECT_NAME, "リンク 検索")
+            any_word = client.search_pages(self.PROJECT_NAME, "リンク 検索", match_any=True)
+
+            assert all_words.count is not None
+            assert any_word.count is not None
+            assert any_word.count >= all_words.count
+
+    def test_search_titles_by_vector(self) -> None:
+        """Test searching pages by vector similarity."""
+        with ScrapboxClient() as client:
+            try:
+                result = client.search_titles_by_vector(self.PROJECT_NAME, "リンク")
+            except SearchServerUpdatingError:  # pragma: no cover - depends on the server
+                pytest.skip("search backend is updating")
+
+            assert len(result.pages) > 0
+            # Results come back most similar first.
+            scores = [page.score for page in result.pages]
+            assert scores == sorted(scores, reverse=True)
+
+    def test_get_project_users(self) -> None:
+        """Test getting the members of a project."""
+        with ScrapboxClient() as client:
+            result = client.get_project_users(self.PROJECT_NAME)
+
+            assert len(result.users) > 0
+            assert all(member.id for member in result.users)
+
+    def test_get_pages_with_sort(self) -> None:
+        """Test that the sort order reaches the API and changes the result.
+
+        The exact order is not asserted: pinned pages always come first and the API
+        collates titles its own way, neither of which this client decides.
+        """
+        with ScrapboxClient() as client:
+            by_title = client.get_pages(self.PROJECT_NAME, limit=10, sort="title")
+            by_linked = client.get_pages(self.PROJECT_NAME, limit=10, sort="linked")
+
+            assert len(by_title.pages) == len(by_linked.pages)
+            assert [page.title for page in by_title.pages] != [page.title for page in by_linked.pages]
+
+    def test_get_pages_with_filter(self) -> None:
+        """Test that filtering narrows the page list."""
+        with ScrapboxClient() as client:
+            everything = client.get_pages(self.PROJECT_NAME, limit=1)
+            filtered = client.get_pages(self.PROJECT_NAME, limit=1, filter_value="no-such-user-12345")
+
+            assert filtered.count <= everything.count
