@@ -95,6 +95,31 @@ def check_page_size(value: int, name: str = "page size") -> int:
     return value
 
 
+def error_detail(response: httpx.Response) -> str | None:
+    """Read the explanation the API put in an error body.
+
+    Most of `/api/` answers `{"name": ..., "message": ...}`; the oEmbed proxy and
+    the edit endpoints answer with `message` alone.
+
+    Args:
+        response: The error response to read.
+
+    Returns:
+        The explanation, or None if the body carries none.
+    """
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    if not isinstance(body, dict):
+        return None
+    message = body.get("message") or body.get("error")
+    if not message:
+        return None
+    name = body.get("name")
+    return f"{name}: {message}" if name else str(message)
+
+
 def page_url(project_name: str, title: str) -> str:
     """Build the URL of a page from its title.
 
@@ -189,32 +214,7 @@ class ScrapboxClient:
         self.client.close()
 
     @staticmethod
-    def _error_detail(response: httpx.Response) -> str | None:
-        """Read the explanation the API put in an error body.
-
-        Most of `/api/` answers `{"name": ..., "message": ...}`; the oEmbed proxy and
-        the edit endpoints answer with `message` alone.
-
-        Args:
-            response: The error response to read.
-
-        Returns:
-            The explanation, or None if the body carries none.
-        """
-        try:
-            body = response.json()
-        except ValueError:
-            return None
-        if not isinstance(body, dict):
-            return None
-        message = body.get("message") or body.get("error")
-        if not message:
-            return None
-        name = body.get("name")
-        return f"{name}: {message}" if name else str(message)
-
-    @classmethod
-    def _raise_for_status(cls, response: httpx.Response) -> None:
+    def _raise_for_status(response: httpx.Response) -> None:
         """Turn an error response into an exception.
 
         The status code alone rarely says what went wrong -- a service account asked
@@ -238,7 +238,7 @@ class ScrapboxClient:
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
-            detail = cls._error_detail(response)
+            detail = error_detail(response)
             if detail is None:
                 raise
             msg = f"{e}\n{detail}"

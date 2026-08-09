@@ -4,17 +4,24 @@ import argparse
 import getpass
 import json
 import os
+import platform
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from textwrap import dedent
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, Self, cast
+
+import httpx
 
 from . import __version__
-from .client import ScrapboxClient, check_page_size, page_url
+from .client import ScrapboxClient, check_page_size, error_detail, page_url
 from .edits import changes_from_ops
+from .exceptions import NotAuthenticatedError
 from .models import InsertChange, Links1hopResponse, Links2hopResponse, PageBase, PageListResponse
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .client import PageSort, SearchSort
 
 CONNECT_SID_FILE_NAME = "connect.sid"
@@ -34,6 +41,32 @@ PAT_PREFIX = "pat_"
 
 SERVICE_ACCOUNT_KEY_PREFIX = "cs_"
 """Prefix identifying a service account access key."""
+
+CONNECT_SID_ENV_VAR = "SBC_CONNECT_SID"
+"""Environment variable holding a connect.sid cookie."""
+
+PAT_ENV_VAR = "SBC_PAT"
+"""Environment variable holding a personal access token."""
+
+SERVICE_ACCOUNT_KEY_ENV_VAR = "SBC_SERVICE_ACCOUNT_KEY"
+"""Environment variable holding a service account access key."""
+
+MASKED_PREFIX_LENGTH = 4
+"""Number of leading characters of a credential `info` prints unmasked.
+
+Every credential type is recognised by a prefix no longer than this, so the type
+stays visible while the secret itself does not.
+"""
+
+WRONG_PROJECT_MESSAGE = "Service account is not available for this project."
+"""Message the API answers with when a service account key is used elsewhere.
+
+A key that does not exist at all is refused in exactly the same way, so this
+answer says nothing about whether the key itself is good.
+"""
+
+CredentialStatus = Literal["not set", "valid", "invalid", "unknown"]
+"""How much `info` could find out about a credential."""
 
 
 class ScrapboxCliArgs(argparse.Namespace):
@@ -346,6 +379,8 @@ def create_parser() -> argparse.ArgumentParser:
                 | sbc edit-preview my-project --page-id <pageId>
               sbc edit-submit my-project <previewId>
               echo "pat_xxxxxxxx" | sbc login
+              sbc info
+              sbc info --project my-business-project --json
 
             `edit-preview` and `edit-submit` need a personal access token or a
             service account access key: the API rejects `connect.sid` for them
@@ -357,6 +392,12 @@ def create_parser() -> argparse.ArgumentParser:
             `sbc login` saves the credential read from stdin, choosing the file by its
             prefix: `s%` for ~/.config/sbc/connect.sid, `pat_` for ~/.config/sbc/pat,
             `cs_` for ~/.config/sbc/service-account-key
+
+            `sbc info` reports the environment and, for each of the three credentials,
+            where it was read from and whether the API still accepts it; a service
+            account access key is only checked when `--project` names the project it
+            belongs to, since every other project refuses a good key and a bogus one
+            alike
 
             priority of `connect.sid` source:
               1. --connect-sid argument
@@ -437,6 +478,16 @@ def create_parser() -> argparse.ArgumentParser:
     # login command
     login_parser = subparsers.add_parser("login", help="Save a credential read from stdin")
     login_parser.set_defaults(handler=cmd_login)
+
+    # info command
+    info_parser = subparsers.add_parser("info", help="Show the environment and the state of each credential")
+    info_parser.add_argument(
+        "--project",
+        default=None,
+        help="Project a service account access key belongs to, needed to check that key",
+    )
+    info_parser.add_argument("--json", "-j", action="store_true", help="Output in JSON format")
+    info_parser.set_defaults(handler=cmd_info)
 
     return parser
 
@@ -1050,8 +1101,37 @@ def cmd_login() -> int:
     return 0
 
 
-def get_credential(value: str | None, file_path: str | None, default_file_name: str, env_var: str) -> str | None:
-    """Get a credential from arguments, a default file, or the environment.
+@dataclass(frozen=True)
+class ResolvedCredential:
+    """A credential together with where it was read from."""
+
+    value: str | None
+    """The credential, or None if none of the sources held one."""
+
+    source: str | None
+    """How the credential was given, as `info` reports it. None if there is none."""
+
+    @classmethod
+    def found(cls, value: str, source: str) -> Self:
+        """Build an entry, treating an empty value as no credential at all.
+
+        A file or an environment variable holding nothing is worth no more than an
+        absent one, so it is not reported as a source either.
+
+        Args:
+            value: The credential read from the source.
+            source: How the credential was given.
+
+        Returns:
+            The credential and its source, or a pair of None if the value is empty.
+        """
+        return cls(value, source) if value else cls(None, None)
+
+
+def resolve_credential(
+    value: str | None, file_path: str | None, default_file_name: str, env_var: str
+) -> ResolvedCredential:
+    """Find a credential in the arguments, a file, or the environment.
 
     Args:
         value: Credential passed directly as an argument.
@@ -1060,24 +1140,65 @@ def get_credential(value: str | None, file_path: str | None, default_file_name: 
         env_var: Name of the environment variable to fall back to.
 
     Returns:
-        The credential string or None if not found.
+        The credential and the source it came from, or a pair of None.
     """
     if value:
-        return value
+        return ResolvedCredential.found(value, "command line argument")
 
     if file_path:
         credential_file = Path(file_path)
         if credential_file.exists():
-            return credential_file.read_text().strip()
+            return ResolvedCredential.found(credential_file.read_text().strip(), str(credential_file))
 
     default_file = get_config_dir() / default_file_name
     if default_file.exists():
-        return default_file.read_text().strip()
+        return ResolvedCredential.found(default_file.read_text().strip(), str(default_file))
 
     if env_var in os.environ:
-        return os.environ[env_var]
+        return ResolvedCredential.found(os.environ[env_var], f"${env_var}")
 
-    return None
+    return ResolvedCredential(None, None)
+
+
+def resolve_connect_sid(args: ScrapboxCliArgs) -> ResolvedCredential:
+    """Find connect.sid in the arguments, the default file, or the environment.
+
+    Args:
+        args: Parsed command-line arguments.
+
+    Returns:
+        The connect.sid and the source it came from.
+    """
+    return resolve_credential(args.connect_sid, args.connect_sid_file, CONNECT_SID_FILE_NAME, CONNECT_SID_ENV_VAR)
+
+
+def resolve_pat(args: ScrapboxCliArgs) -> ResolvedCredential:
+    """Find the personal access token in the arguments, the default file, or the environment.
+
+    Args:
+        args: Parsed command-line arguments.
+
+    Returns:
+        The personal access token and the source it came from.
+    """
+    return resolve_credential(args.pat, args.pat_file, PAT_FILE_NAME, PAT_ENV_VAR)
+
+
+def resolve_service_account_key(args: ScrapboxCliArgs) -> ResolvedCredential:
+    """Find the service account access key in the arguments, the default file, or the environment.
+
+    Args:
+        args: Parsed command-line arguments.
+
+    Returns:
+        The service account access key and the source it came from.
+    """
+    return resolve_credential(
+        args.service_account_key,
+        args.service_account_key_file,
+        SERVICE_ACCOUNT_KEY_FILE_NAME,
+        SERVICE_ACCOUNT_KEY_ENV_VAR,
+    )
 
 
 def get_connect_sid(args: ScrapboxCliArgs) -> str | None:
@@ -1089,7 +1210,7 @@ def get_connect_sid(args: ScrapboxCliArgs) -> str | None:
     Returns:
         The connect.sid string or None if not found.
     """
-    return get_credential(args.connect_sid, args.connect_sid_file, CONNECT_SID_FILE_NAME, "SBC_CONNECT_SID")
+    return resolve_connect_sid(args).value
 
 
 def get_pat(args: ScrapboxCliArgs) -> str | None:
@@ -1101,7 +1222,7 @@ def get_pat(args: ScrapboxCliArgs) -> str | None:
     Returns:
         The personal access token string or None if not found.
     """
-    return get_credential(args.pat, args.pat_file, PAT_FILE_NAME, "SBC_PAT")
+    return resolve_pat(args).value
 
 
 def get_service_account_key(args: ScrapboxCliArgs) -> str | None:
@@ -1113,12 +1234,230 @@ def get_service_account_key(args: ScrapboxCliArgs) -> str | None:
     Returns:
         The service account access key or None if not found.
     """
-    return get_credential(
-        args.service_account_key,
-        args.service_account_key_file,
-        SERVICE_ACCOUNT_KEY_FILE_NAME,
-        "SBC_SERVICE_ACCOUNT_KEY",
+    return resolve_service_account_key(args).value
+
+
+def mask_credential(credential: str) -> str:
+    """Describe a credential without printing enough of it to be reused.
+
+    Args:
+        credential: The credential to describe.
+
+    Returns:
+        Its first few characters, which carry only the type prefix, and its length.
+    """
+    return f"{credential[:MASKED_PREFIX_LENGTH]}... ({len(credential)} chars)"
+
+
+def describe_http_error(error: httpx.HTTPStatusError) -> str:
+    """Describe a failed request in a single line.
+
+    Args:
+        error: The error raised by the request.
+
+    Returns:
+        The status code, followed by the API's own explanation when it gave one.
+    """
+    detail = error_detail(error.response)
+    status = f"HTTP {error.response.status_code}"
+    return f"{status}: {detail}" if detail else status
+
+
+def check_user_credential(*, connect_sid: str | None = None, pat: str | None = None) -> tuple[CredentialStatus, str]:
+    """Ask the API who a connect.sid cookie or a personal access token stands for.
+
+    Args:
+        connect_sid: The cookie to check, if that is the credential being checked.
+        pat: The personal access token to check, if that is the one being checked.
+
+    Returns:
+        The status and a line explaining it: the user for a credential that works,
+        the API's refusal otherwise.
+    """
+    with ScrapboxClient(connect_sid=connect_sid, pat=pat) as client:
+        try:
+            me = client.get_me()
+        except NotAuthenticatedError:
+            # `users/me` answers 200 to an expired cookie, only leaving out the user.
+            return "invalid", "the API answered as a guest, so it did not accept this credential"
+        except httpx.HTTPStatusError as e:
+            return "invalid", describe_http_error(e)
+        except httpx.HTTPError as e:
+            return "unknown", f"could not reach the API: {e}"
+    return "valid", f"{me.name} ({me.display_name})"
+
+
+def check_service_account_key(key: str, project: str | None) -> tuple[CredentialStatus, str]:
+    """Ask the API whether a service account access key still opens its project.
+
+    A service account reaches one project only, and every other project answers 400
+    whether the key is good or not, so the check needs to be told which project the
+    key belongs to.
+
+    Args:
+        key: The service account access key to check.
+        project: The project the key belongs to, or None if it was not given.
+
+    Returns:
+        The status and a line explaining it.
+    """
+    if project is None:
+        return "unknown", "pass --project <name> to check this key against the project it belongs to"
+    with ScrapboxClient(service_account_key=key) as client:
+        try:
+            client.get_project_users(project)
+        except httpx.HTTPStatusError as e:
+            detail = describe_http_error(e)
+            if WRONG_PROJECT_MESSAGE in detail:
+                return "unknown", (
+                    f"'{project}' is not the project this key belongs to, and a key that does not "
+                    f"exist is refused the same way; retry with the key's own project"
+                )
+            return "invalid", f"{detail} (project: {project})"
+        except httpx.HTTPError as e:
+            return "unknown", f"could not reach the API: {e}"
+    return "valid", f"accepted by project '{project}'"
+
+
+@dataclass(frozen=True)
+class CredentialInfo:
+    """What `info` found out about one of the three credentials."""
+
+    name: str
+    """Name of the credential type, as it is printed."""
+
+    key: str
+    """Name of the credential type in the JSON output."""
+
+    source: str | None
+    """Where the credential was read from, or None if it is not set."""
+
+    masked: str | None
+    """The credential, masked, or None if it is not set."""
+
+    status: CredentialStatus
+    """Whether the API accepted the credential."""
+
+    detail: str | None
+    """A line explaining the status, or None if it needs none."""
+
+    in_use: bool
+    """Whether this is the credential the other commands would send."""
+
+
+def collect_credentials(args: ScrapboxCliArgs) -> list[CredentialInfo]:
+    """Resolve the three credentials and ask the API whether it still accepts them.
+
+    Args:
+        args: Parsed command-line arguments.
+
+    Returns:
+        One entry per credential type, in the order the client prefers them. Only
+        the credentials that are set cost a request.
+    """
+    pat = resolve_pat(args)
+    service_account_key = resolve_service_account_key(args)
+    connect_sid = resolve_connect_sid(args)
+    # Only one credential is ever sent, so name the one that would win.
+    in_use = next((r for r in (pat, service_account_key, connect_sid) if r.value), None)
+
+    checks: tuple[tuple[str, str, ResolvedCredential, Callable[[str], tuple[CredentialStatus, str]]], ...] = (
+        ("personal access token", "pat", pat, lambda value: check_user_credential(pat=value)),
+        (
+            "service account access key",
+            "serviceAccountKey",
+            service_account_key,
+            lambda value: check_service_account_key(value, args.project),
+        ),
+        ("connect.sid cookie", "connectSid", connect_sid, lambda value: check_user_credential(connect_sid=value)),
     )
+
+    infos = []
+    for name, key, resolved, check in checks:
+        status: CredentialStatus = "not set"
+        detail: str | None = None
+        if resolved.value:
+            status, detail = check(resolved.value)
+        infos.append(
+            CredentialInfo(
+                name=name,
+                key=key,
+                source=resolved.source,
+                masked=mask_credential(resolved.value) if resolved.value else None,
+                status=status,
+                detail=detail,
+                in_use=resolved is in_use,
+            )
+        )
+    return infos
+
+
+def cmd_info(args: ScrapboxCliArgs) -> int:
+    """Execute info command.
+
+    Unlike the other commands this one takes no client: it builds one per
+    credential, so that each is checked on its own rather than through the
+    precedence the other commands apply.
+
+    Args:
+        args: Parsed command-line arguments.
+
+    Returns:
+        Exit code.
+    """
+    credentials = collect_credentials(args)
+    config_dir = get_config_dir()
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "version": __version__,
+                    "python": platform.python_version(),
+                    "pythonImplementation": platform.python_implementation(),
+                    "executable": sys.executable,
+                    "platform": platform.platform(),
+                    "httpx": httpx.__version__,
+                    "configDir": str(config_dir),
+                    "credentials": [
+                        {
+                            "name": credential.key,
+                            "status": credential.status,
+                            "source": credential.source,
+                            "value": credential.masked,
+                            "detail": credential.detail,
+                            "inUse": credential.in_use,
+                        }
+                        for credential in credentials
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+
+    print(f"sbc:        {__version__}")
+    print(f"python:     {platform.python_version()} ({platform.python_implementation()})")
+    print(f"executable: {sys.executable}")
+    print(f"platform:   {platform.platform()}")
+    print(f"httpx:      {httpx.__version__}")
+    print(f"config dir: {config_dir}{'' if config_dir.is_dir() else ' (does not exist)'}")
+    print()
+    print("=== credentials ===")
+    for credential in credentials:
+        in_use = " [in use]" if credential.in_use else ""
+        print(f"- {credential.name}: {credential.status}{in_use}")
+        if credential.source is not None:
+            print(f"    source: {credential.source}")
+        if credential.masked is not None:
+            print(f"    value:  {credential.masked}")
+        if credential.detail is not None:
+            print(f"    detail: {credential.detail}")
+    if not any(credential.in_use for credential in credentials):
+        print()
+        print("no credential is set: only public projects can be read")
+    return 0
 
 
 def main(*, test_args: list[str] | None = None) -> int:
@@ -1140,6 +1479,10 @@ def main(*, test_args: list[str] | None = None) -> int:
 
     if args.handler is cmd_login:
         return cmd_login()
+
+    if args.handler is cmd_info:
+        # Every credential is checked on its own, so the shared client is of no use.
+        return cmd_info(args)
 
     with ScrapboxClient(
         connect_sid=get_connect_sid(args),

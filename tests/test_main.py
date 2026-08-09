@@ -5,15 +5,18 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import platform
 import stat
-from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, patch
+from typing import TYPE_CHECKING, cast
+from unittest.mock import MagicMock, call, patch
 
+import httpx
 import pytest
 
 from scrapbox.client import MAX_PAGE_SIZE
-from scrapbox.exceptions import PersonalAccessTokenRequiredError
+from scrapbox.exceptions import NotAuthenticatedError, PersonalAccessTokenRequiredError
 from scrapbox.main import (
+    WRONG_PROJECT_MESSAGE,
     check_output_path,
     get_connect_sid,
     get_pat,
@@ -1146,3 +1149,303 @@ class TestAuthenticatedCommands:
 
         assert exit_code == 1
         assert "personal access token" in capfd.readouterr().err
+
+
+class TestInfoCommand:
+    """Test the info command, against a mocked client."""
+
+    PAT = "pat_abc123"
+    CONNECT_SID = "s%3Aabc123"
+    SERVICE_ACCOUNT_KEY = "cs_abc123"
+    PROJECT_NAME = "my-project"
+
+    @pytest.fixture(autouse=True)
+    def _isolate_credentials(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Keep ambient credential files and environment variables out of these tests."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        monkeypatch.delenv("SBC_CONNECT_SID", raising=False)
+        monkeypatch.delenv("SBC_PAT", raising=False)
+        monkeypatch.delenv("SBC_SERVICE_ACCOUNT_KEY", raising=False)
+
+    @pytest.fixture
+    def client_class(self) -> Iterator[MagicMock]:
+        """Replace the client `info` builds for each credential with a mock."""
+        with patch("scrapbox.main.ScrapboxClient") as mock_class:
+            mock_class.return_value.__enter__.return_value = MagicMock()
+            yield mock_class
+
+    @pytest.fixture
+    def client(self, client_class: MagicMock) -> MagicMock:
+        """The mocked client instance every check is run against."""
+        return cast("MagicMock", client_class.return_value.__enter__.return_value)
+
+    @staticmethod
+    def _save(tmp_path: Path, file_name: str, credential: str) -> None:
+        """Write a credential into the config directory of the fake home."""
+        config_dir = tmp_path / ".config" / "sbc"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        (config_dir / file_name).write_text(f"{credential}\n")
+
+    @staticmethod
+    def _http_error(status_code: int, body: dict[str, str]) -> httpx.HTTPStatusError:
+        """Build the error a failing request would raise, carrying the API's body."""
+        request = httpx.Request("GET", "https://scrapbox.io/api/users/me")
+        response = httpx.Response(status_code, json=body, request=request)
+        return httpx.HTTPStatusError("boom", request=request, response=response)
+
+    @staticmethod
+    def _me() -> Me:
+        """Build the user a working credential resolves to."""
+        return Me(id="abc", name="shokai", display_name="Sho", email="s@example.com")
+
+    def test_reports_the_environment(self, capfd: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+        """Test that the version, the interpreter and the config directory are reported."""
+        exit_code = main(test_args=["info"])
+
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert "sbc:" in captured.out
+        assert f"python:     {platform.python_version()}" in captured.out
+        assert f"config dir: {tmp_path / '.config' / 'sbc'}" in captured.out
+        assert "(does not exist)" in captured.out
+
+    def test_unset_credentials_cost_no_request(
+        self, client_class: MagicMock, capfd: pytest.CaptureFixture[str]
+    ) -> None:
+        """Test that nothing is sent when no credential is configured."""
+        exit_code = main(test_args=["info"])
+
+        assert exit_code == 0
+        client_class.assert_not_called()
+        captured = capfd.readouterr()
+        assert "- personal access token: not set" in captured.out
+        assert "- service account access key: not set" in captured.out
+        assert "- connect.sid cookie: not set" in captured.out
+        assert "no credential is set" in captured.out
+
+    def test_valid_pat_is_reported_with_its_user(
+        self, client: MagicMock, capfd: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """Test that a personal access token the API accepts names the user it stands for."""
+        self._save(tmp_path, "pat", self.PAT)
+        client.get_me.return_value = self._me()
+
+        exit_code = main(test_args=["info"])
+
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert "- personal access token: valid [in use]" in captured.out
+        assert "detail: shokai (Sho)" in captured.out
+        assert f"source: {tmp_path / '.config' / 'sbc' / 'pat'}" in captured.out
+
+    def test_credential_is_masked(self, client: MagicMock, capfd: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+        """Test that the credential itself is not printed back."""
+        self._save(tmp_path, "pat", self.PAT)
+        client.get_me.return_value = self._me()
+
+        assert main(test_args=["info"]) == 0
+
+        captured = capfd.readouterr()
+        assert self.PAT not in captured.out
+        assert f"value:  pat_... ({len(self.PAT)} chars)" in captured.out
+
+    def test_rejected_pat_is_reported_with_the_reason(
+        self, client: MagicMock, capfd: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """Test that the API's own explanation of a refusal is shown."""
+        self._save(tmp_path, "pat", self.PAT)
+        client.get_me.side_effect = self._http_error(
+            401, {"name": "InvalidPersonalAccessTokenError", "message": "Invalid Personal Access Token."}
+        )
+
+        exit_code = main(test_args=["info"])
+
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert "- personal access token: invalid [in use]" in captured.out
+        assert "detail: HTTP 401: InvalidPersonalAccessTokenError: Invalid Personal Access Token." in captured.out
+
+    def test_expired_connect_sid_is_reported(
+        self, client: MagicMock, capfd: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """Test that a cookie the API answers as a guest to counts as invalid."""
+        self._save(tmp_path, "connect.sid", self.CONNECT_SID)
+        client.get_me.side_effect = NotAuthenticatedError
+
+        exit_code = main(test_args=["info"])
+
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert "- connect.sid cookie: invalid [in use]" in captured.out
+        assert "guest" in captured.out
+
+    def test_unreachable_api_is_not_called_invalid(
+        self, client: MagicMock, capfd: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """Test that a credential is not blamed for a connection that never got through."""
+        self._save(tmp_path, "pat", self.PAT)
+        client.get_me.side_effect = httpx.ConnectError("no route to host")
+
+        exit_code = main(test_args=["info"])
+
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert "- personal access token: unknown [in use]" in captured.out
+        assert "could not reach the API" in captured.out
+
+    def test_unreachable_api_leaves_the_service_account_key_unjudged(
+        self, client: MagicMock, capfd: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """Test that a service account key survives a request that never got through."""
+        self._save(tmp_path, "service-account-key", self.SERVICE_ACCOUNT_KEY)
+        client.get_project_users.side_effect = httpx.ConnectError("no route to host")
+
+        exit_code = main(test_args=["info", "--project", self.PROJECT_NAME])
+
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert "- service account access key: unknown [in use]" in captured.out
+        assert "could not reach the API" in captured.out
+
+    def test_service_account_key_needs_a_project(
+        self, client_class: MagicMock, capfd: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """Test that a service account key alone is reported as unchecked, not as bad."""
+        self._save(tmp_path, "service-account-key", self.SERVICE_ACCOUNT_KEY)
+
+        exit_code = main(test_args=["info"])
+
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert "- service account access key: unknown [in use]" in captured.out
+        assert "pass --project" in captured.out
+        # Nothing can be asked of the API without knowing the project.
+        client_class.assert_not_called()
+
+    def test_service_account_key_is_checked_against_its_project(
+        self, client: MagicMock, capfd: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """Test that --project turns the service account key into a real check."""
+        self._save(tmp_path, "service-account-key", self.SERVICE_ACCOUNT_KEY)
+        client.get_project_users.return_value = MagicMock()
+
+        exit_code = main(test_args=["info", "--project", self.PROJECT_NAME])
+
+        assert exit_code == 0
+        client.get_project_users.assert_called_once_with(self.PROJECT_NAME)
+        captured = capfd.readouterr()
+        assert "- service account access key: valid [in use]" in captured.out
+        assert f"accepted by project '{self.PROJECT_NAME}'" in captured.out
+
+    def test_service_account_key_on_another_project_stays_unknown(
+        self, client: MagicMock, capfd: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """Test that the answer a key of any kind gets elsewhere is not read as a verdict."""
+        self._save(tmp_path, "service-account-key", self.SERVICE_ACCOUNT_KEY)
+        client.get_project_users.side_effect = self._http_error(
+            400, {"name": "BadRequestError", "message": WRONG_PROJECT_MESSAGE}
+        )
+
+        exit_code = main(test_args=["info", "--project", self.PROJECT_NAME])
+
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert "- service account access key: unknown [in use]" in captured.out
+        assert f"'{self.PROJECT_NAME}' is not the project this key belongs to" in captured.out
+
+    def test_rejected_service_account_key_is_reported(
+        self, client: MagicMock, capfd: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """Test that a refusal other than the wrong-project one is a verdict."""
+        self._save(tmp_path, "service-account-key", self.SERVICE_ACCOUNT_KEY)
+        client.get_project_users.side_effect = self._http_error(
+            401, {"name": "NotLoggedInError", "message": "Not logged in."}
+        )
+
+        exit_code = main(test_args=["info", "--project", self.PROJECT_NAME])
+
+        assert exit_code == 0
+        captured = capfd.readouterr()
+        assert "- service account access key: invalid [in use]" in captured.out
+        assert "HTTP 401: NotLoggedInError: Not logged in." in captured.out
+
+    def test_each_credential_is_checked_on_its_own(
+        self, client_class: MagicMock, client: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test that a credential is never checked through another one's client."""
+        self._save(tmp_path, "pat", self.PAT)
+        self._save(tmp_path, "connect.sid", self.CONNECT_SID)
+        client.get_me.return_value = self._me()
+
+        assert main(test_args=["info"]) == 0
+
+        assert client_class.call_args_list == [
+            call(connect_sid=None, pat=self.PAT),
+            call(connect_sid=self.CONNECT_SID, pat=None),
+        ]
+
+    def test_only_the_credential_that_would_be_sent_is_in_use(
+        self, client: MagicMock, capfd: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """Test that the precedence between the credentials is reported."""
+        self._save(tmp_path, "pat", self.PAT)
+        self._save(tmp_path, "connect.sid", self.CONNECT_SID)
+        client.get_me.return_value = self._me()
+
+        assert main(test_args=["info"]) == 0
+
+        captured = capfd.readouterr()
+        assert captured.out.count("[in use]") == 1
+        assert "- personal access token: valid [in use]" in captured.out
+        assert "- connect.sid cookie: valid\n" in captured.out
+
+    def test_sources_other_than_the_config_directory(
+        self, client: MagicMock, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that an argument and an environment variable are named as sources."""
+        monkeypatch.setenv("SBC_CONNECT_SID", self.CONNECT_SID)
+        client.get_me.return_value = self._me()
+
+        assert main(test_args=["--pat", self.PAT, "info"]) == 0
+
+        captured = capfd.readouterr()
+        assert "source: command line argument" in captured.out
+        assert "source: $SBC_CONNECT_SID" in captured.out
+
+    def test_empty_credential_file_is_not_a_source(
+        self, client_class: MagicMock, capfd: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """Test that a file holding nothing counts as no credential at all."""
+        self._save(tmp_path, "pat", "")
+
+        assert main(test_args=["info"]) == 0
+
+        captured = capfd.readouterr()
+        assert "- personal access token: not set" in captured.out
+        assert "source:" not in captured.out
+        client_class.assert_not_called()
+
+    def test_json_output(self, client: MagicMock, capfd: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+        """Test that the JSON output carries the same findings."""
+        self._save(tmp_path, "pat", self.PAT)
+        client.get_me.return_value = self._me()
+
+        assert main(test_args=["info", "--json"]) == 0
+
+        out = capfd.readouterr().out
+        assert self.PAT not in out
+        payload = json.loads(out)
+        assert payload["python"] == platform.python_version()
+        assert payload["configDir"] == str(tmp_path / ".config" / "sbc")
+        credentials = {entry["name"]: entry for entry in payload["credentials"]}
+        assert credentials["pat"]["status"] == "valid"
+        assert credentials["pat"]["inUse"] is True
+        assert credentials["pat"]["value"] == f"pat_... ({len(self.PAT)} chars)"
+        assert credentials["connectSid"] == {
+            "name": "connectSid",
+            "status": "not set",
+            "source": None,
+            "value": None,
+            "detail": None,
+            "inUse": False,
+        }

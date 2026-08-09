@@ -32,12 +32,12 @@ pip install scrapbox-client
 
 ```shellsession
 $ sbc
-usage: sbc [-h] [--version] [--connect-sid CONNECT_SID | --connect-sid-file CONNECT_SID_FILE] [--pat PAT | --pat-file PAT_FILE] [--service-account-key SERVICE_ACCOUNT_KEY | --service-account-key-file SERVICE_ACCOUNT_KEY_FILE] {pages,all-pages,page,text,icon,page-v2,links,search,vector-search,commits,members,projects,project,whoami,file,file-info,edit-preview,edit-submit,login} ...
+usage: sbc [-h] [--version] [--connect-sid CONNECT_SID | --connect-sid-file CONNECT_SID_FILE] [--pat PAT | --pat-file PAT_FILE] [--service-account-key SERVICE_ACCOUNT_KEY | --service-account-key-file SERVICE_ACCOUNT_KEY_FILE] {pages,all-pages,page,text,icon,page-v2,links,search,vector-search,commits,members,projects,project,whoami,file,file-info,edit-preview,edit-submit,login,info} ...
 
 Scrapbox API client CLI
 
 positional arguments:
-  {pages,all-pages,page,text,icon,page-v2,links,search,vector-search,commits,members,projects,project,whoami,file,file-info,edit-preview,edit-submit,login}
+  {pages,all-pages,page,text,icon,page-v2,links,search,vector-search,commits,members,projects,project,whoami,file,file-info,edit-preview,edit-submit,login,info}
                         Available commands
     pages               Get page list from a project
     all-pages           Get all pages from a project
@@ -59,6 +59,7 @@ positional arguments:
                         auth)
     edit-submit         Commit a previewed page edit (no cookie auth)
     login               Save a credential read from stdin
+    info                Show the environment and the state of each credential
 
 options:
   -h, --help            show this help message and exit
@@ -97,6 +98,8 @@ examples:
     | sbc edit-preview my-project --page-id <pageId>
   sbc edit-submit my-project <previewId>
   echo "pat_xxxxxxxx" | sbc login
+  sbc info
+  sbc info --project my-business-project --json
 
 `edit-preview` and `edit-submit` need a personal access token or a
 service account access key: the API rejects `connect.sid` for them
@@ -108,6 +111,12 @@ reaches only that one, so any other project answers 400 and `projects`,
 `sbc login` saves the credential read from stdin, choosing the file by its
 prefix: `s%` for ~/.config/sbc/connect.sid, `pat_` for ~/.config/sbc/pat,
 `cs_` for ~/.config/sbc/service-account-key
+
+`sbc info` reports the environment and, for each of the three credentials,
+where it was read from and whether the API still accepts it; a service
+account access key is only checked when `--project` names the project it
+belongs to, since every other project refuses a good key and a bogus one
+alike
 
 priority of `connect.sid` source:
   1. --connect-sid argument
@@ -151,6 +160,60 @@ $ sbc login
 Enter connect.sid, personal access token or service account access key:
 Saved to /home/you/.config/sbc/connect.sid
 ```
+
+### 環境と認証情報の確認
+
+`sbc info` はバージョン・インタプリタ・設定ディレクトリを出力したうえで、
+3 種類の認証情報それぞれについて、どこから読まれたか、値(接頭辞と文字数だけに伏せたもの)、
+そして API がまだ受け付けるかどうかを報告する。
+リクエストが飛ぶのは設定済みの認証情報だけで、
+他のコマンドが実際に送るものには `[in use]` が付く。
+
+```shellsession
+$ sbc info
+sbc:        0.4.0
+python:     3.14.7 (CPython)
+executable: /usr/bin/python3
+platform:   Linux-7.0.0-27-generic-x86_64-with-glibc2.43
+httpx:      0.28.1
+config dir: /home/you/.config/sbc
+
+=== credentials ===
+- personal access token: valid [in use]
+    source: /home/you/.config/sbc/pat
+    value:  pat_... (68 chars)
+    detail: you (You)
+- service account access key: unknown
+    source: $SBC_SERVICE_ACCOUNT_KEY
+    value:  cs_a... (67 chars)
+    detail: pass --project <name> to check this key against the project it belongs to
+- connect.sid cookie: invalid
+    source: /home/you/.config/sbc/connect.sid
+    value:  s%3A... (92 chars)
+    detail: the API answered as a guest, so it did not accept this credential
+```
+
+| 状態 | 意味 |
+| --- | --- |
+| `valid` | API が受け付けた |
+| `invalid` | API が拒否した、またはゲスト扱いで応答した |
+| `unknown` | 確認できなかった |
+| `not set` | どの取得元にも無かった |
+
+Service Account Access Key が届くのは 1 プロジェクトだけで、
+それ以外のプロジェクトは正しいキーもでたらめなキーも同じように拒否する。
+そのため `--project` でキーの属するプロジェクトを指定するまでは `unknown` のままになる。
+
+```shellsession
+$ sbc info --project my-business-project
+...
+- service account access key: valid [in use]
+    source: /home/you/.config/sbc/service-account-key
+    value:  cs_a... (67 chars)
+    detail: accepted by project 'my-business-project'
+```
+
+`sbc info --json` は同じ内容を JSON で出力する。
 
 ### ページの作成と編集(PAT / Service Account Access Key限定)
 
