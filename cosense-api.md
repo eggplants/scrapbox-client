@@ -2,13 +2,6 @@
 
 このパッケージ (`scrapbox/`) が実際に叩く `https://scrapbox.io/api/` 以下のエンドポイントをまとめたリファレンス。
 
-記載内容の出所は三つある。
-
-- `scrapbox/client.py` と `scrapbox/models.py` の実装（どのパスにどのパラメータを送り、どの field を読むか）
-- 公開プロジェクト `help-jp` に対する実測（ステータスコード、実際に返る field、パラメータの丸め方）
-- Business プロジェクトに対する Service Account での実測（読み取りの可否、書き込み、新規作成）
-- それでも実測できないエンドポイントについては、`tests/test_client_mock.py` が持つ実レスポンス由来のペイロード
-
 **これは Cosense API の全体像ではない。**
 このクライアントが叩かないエンドポイントは扱っていない。
 

@@ -3,7 +3,7 @@ openapi: 3.1.0
 info:
   title: Cosense (Scrapbox) HTTP API
   version: "2026-08-09"
-  summary: Cosense HTTP APIの非公式API定義。
+  summary: Cosense HTTP API の非公式 OpenAPI Spec です。
   description: |
     レスポンススキーマの `required` は、実測で必ず現れた field だけに絞ってある。
     Cosense は「値が null」ではなく「key ごと落とす」ことがあり、たとえば実体の無いページ
