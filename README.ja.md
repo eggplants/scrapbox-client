@@ -35,8 +35,6 @@ pip install scrapbox-client
 
 ## CLI
 
-<details>
-
 ```shellsession
 $ sbc
 usage: sbc [-h] [--version] [--connect-sid CONNECT_SID | --connect-sid-file CONNECT_SID_FILE] [--pat PAT | --pat-file PAT_FILE] [--service-account-key SERVICE_ACCOUNT_KEY | --service-account-key-file SERVICE_ACCOUNT_KEY_FILE] {pages,all-pages,page,text,icon,page-v2,links,search,vector-search,commits,members,projects,project,whoami,file,file-info,edit-preview,edit-submit,login,info} ...
@@ -147,7 +145,7 @@ a personal access token takes precedence over a service account access
 key, which takes precedence over `connect.sid`
 ```
 
-</details>
+<details>
 
 ### 認証情報の保存
 
@@ -300,9 +298,9 @@ page (after apply):
 
 参照: <https://helpfeel.com/help/--67e0bedcc6d6e5bea3a235b8>
 
-## ライブラリ
+</details>
 
-### 概要
+## ライブラリ
 
 ```python
 from scrapbox.client import ScrapboxClient
@@ -366,6 +364,8 @@ with ScrapboxClient(pat=pat) as client:
     except Exception as e:
         print(f"Error: {e}")
 ```
+
+<details>
 
 ### ページサイズの上限
 
@@ -546,6 +546,8 @@ with ScrapboxClient() as client:
     except Exception as e:
         print(f"Error: {e}")
 ```
+
+</details>
 
 ## ライセンス
 
