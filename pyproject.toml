@@ -6,7 +6,17 @@ requires = [ "hatchling", "uv-dynamic-versioning" ]
 name = "scrapbox-client"
 description = "Scrapbox (Helpfeel Cosense) API Client"
 readme = "README.md"
-keywords = [ "api", "cli", "client", "cosense", "helpfeel", "scrapbox" ]
+keywords = [
+  "api",
+  "api-client",
+  "cli",
+  "client",
+  "cosense",
+  "downloader",
+  "gyazo",
+  "helpfeel",
+  "scrapbox",
+]
 license-files = [ "LICENSE" ]
 authors = [ { name = "eggplants", email = "w10776e8w@yahoo.co.jp" } ]
 requires-python = ">=3.14"
@@ -20,6 +30,7 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
   "Topic :: Internet :: WWW/HTTP",
   "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Text Processing :: Markup",
   "Topic :: Utilities",
   "Typing :: Typed",
 ]
@@ -28,6 +39,8 @@ dependencies = [
   "httpx>=0.28.1",
   "pydantic>=2.12.5",
 ]
+urls.Documentation = "https://egpl.dev/scrapbox-client/"
+urls.Issues = "https://github.com/eggplants/scrapbox-client/issues"
 urls.Repository = "https://github.com/eggplants/scrapbox-client"
 scripts.sbc = "scrapbox.main:main"
 
