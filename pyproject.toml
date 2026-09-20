@@ -42,7 +42,7 @@ dependencies = [
 urls.Documentation = "https://egpl.dev/scrapbox-client/"
 urls.Issues = "https://github.com/eggplants/scrapbox-client/issues"
 urls.Repository = "https://github.com/eggplants/scrapbox-client"
-scripts.sbc = "scrapbox.main:main"
+scripts.sbc = "scrapbox.cli:main"
 
 [dependency-groups]
 dev = [
@@ -78,7 +78,7 @@ lint.ignore = [
   "COM812",
   "CPY001", # Missing copyright notice (this project does not use file headers)
 ]
-lint.per-file-ignores."main.py" = [
+lint.per-file-ignores."scrapbox/cli.py" = [
   "S101", # Use of assert detected
   "T201", # `print` found
 ]

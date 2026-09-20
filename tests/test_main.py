@@ -13,9 +13,7 @@ from unittest.mock import MagicMock, call, patch
 import httpx
 import pytest
 
-from scrapbox.client import MAX_PAGE_SIZE
-from scrapbox.exceptions import NotAuthenticatedError, PersonalAccessTokenRequiredError
-from scrapbox.main import (
+from scrapbox.cli import (
     WRONG_PROJECT_MESSAGE,
     check_output_path,
     get_connect_sid,
@@ -24,6 +22,8 @@ from scrapbox.main import (
     main,
     save_credential,
 )
+from scrapbox.client import MAX_PAGE_SIZE
+from scrapbox.exceptions import NotAuthenticatedError, PersonalAccessTokenRequiredError
 from scrapbox.models import (
     Commit,
     CommitsResponse,
@@ -506,7 +506,7 @@ class TestConnectSidPriority:
         sid_file = tmp_path / "test.sid"
         sid_file.write_text("file-sid-value")
 
-        with patch("scrapbox.main.ScrapboxClient") as mock_client:
+        with patch("scrapbox.cli.ScrapboxClient") as mock_client:
             mock_instance = MagicMock()
             mock_client.return_value.__enter__.return_value = mock_instance
             mock_instance.get_pages.return_value = MagicMock(
@@ -526,7 +526,7 @@ class TestConnectSidPriority:
         sid_file = tmp_path / "test.sid"
         sid_file.write_text("file-sid-value\n")
 
-        with patch("scrapbox.main.ScrapboxClient") as mock_client:
+        with patch("scrapbox.cli.ScrapboxClient") as mock_client:
             mock_instance = MagicMock()
             mock_client.return_value.__enter__.return_value = mock_instance
             mock_instance.get_pages.return_value = MagicMock(
@@ -550,7 +550,7 @@ class TestConnectSidPriority:
         default_sid_file = config_dir / "connect.sid"
         default_sid_file.write_text("default-sid-value\n")
 
-        with patch("scrapbox.main.ScrapboxClient") as mock_client:
+        with patch("scrapbox.cli.ScrapboxClient") as mock_client:
             mock_instance = MagicMock()
             mock_client.return_value.__enter__.return_value = mock_instance
             mock_instance.get_pages.return_value = MagicMock(
@@ -569,7 +569,7 @@ class TestConnectSidPriority:
         """Test that connect_sid is None when no file exists."""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
 
-        with patch("scrapbox.main.ScrapboxClient") as mock_client:
+        with patch("scrapbox.cli.ScrapboxClient") as mock_client:
             mock_instance = MagicMock()
             mock_client.return_value.__enter__.return_value = mock_instance
             mock_instance.get_pages.return_value = MagicMock(
@@ -588,7 +588,7 @@ class TestConnectSidPriority:
         """Test that connect_sid is None when specified file doesn't exist."""
         non_existent_file = tmp_path / "non_existent.sid"
 
-        with patch("scrapbox.main.ScrapboxClient") as mock_client:
+        with patch("scrapbox.cli.ScrapboxClient") as mock_client:
             mock_instance = MagicMock()
             mock_client.return_value.__enter__.return_value = mock_instance
             mock_instance.get_pages.return_value = MagicMock(
@@ -641,7 +641,7 @@ class TestPatPriority:
     def test_pat_from_argument(self) -> None:
         """Test that --pat is passed to the client."""
         mock_client = self._mock_client()
-        with patch("scrapbox.main.ScrapboxClient", mock_client):
+        with patch("scrapbox.cli.ScrapboxClient", mock_client):
             main(test_args=["--pat", "arg-pat-value", "pages", self.PROJECT_NAME])
 
             mock_client.assert_called_once_with(connect_sid=None, pat="arg-pat-value", service_account_key=None)
@@ -652,7 +652,7 @@ class TestPatPriority:
         pat_file.write_text("file-pat-value\n")
 
         mock_client = self._mock_client()
-        with patch("scrapbox.main.ScrapboxClient", mock_client):
+        with patch("scrapbox.cli.ScrapboxClient", mock_client):
             main(test_args=["--pat-file", str(pat_file), "pages", self.PROJECT_NAME])
 
             mock_client.assert_called_once_with(connect_sid=None, pat="file-pat-value", service_account_key=None)
@@ -664,7 +664,7 @@ class TestPatPriority:
         (config_dir / "pat").write_text("default-pat-value\n")
 
         mock_client = self._mock_client()
-        with patch("scrapbox.main.ScrapboxClient", mock_client):
+        with patch("scrapbox.cli.ScrapboxClient", mock_client):
             main(test_args=["pages", self.PROJECT_NAME])
 
             mock_client.assert_called_once_with(connect_sid=None, pat="default-pat-value", service_account_key=None)
@@ -672,7 +672,7 @@ class TestPatPriority:
     def test_pat_and_connect_sid_are_both_passed(self) -> None:
         """Test that both credentials reach the client, which resolves the precedence."""
         mock_client = self._mock_client()
-        with patch("scrapbox.main.ScrapboxClient", mock_client):
+        with patch("scrapbox.cli.ScrapboxClient", mock_client):
             main(test_args=["--connect-sid", "sid-value", "--pat", "pat-value", "pages", self.PROJECT_NAME])
 
             mock_client.assert_called_once_with(connect_sid="sid-value", pat="pat-value", service_account_key=None)
@@ -685,7 +685,7 @@ class TestPatPriority:
     def test_service_account_key_from_argument(self) -> None:
         """Test that --service-account-key is passed to the client."""
         mock_client = self._mock_client()
-        with patch("scrapbox.main.ScrapboxClient", mock_client):
+        with patch("scrapbox.cli.ScrapboxClient", mock_client):
             main(test_args=["--service-account-key", "cs_arg-value", "pages", self.PROJECT_NAME])
 
             mock_client.assert_called_once_with(connect_sid=None, pat=None, service_account_key="cs_arg-value")
@@ -697,7 +697,7 @@ class TestPatPriority:
         (config_dir / "service-account-key").write_text("cs_default-value\n")
 
         mock_client = self._mock_client()
-        with patch("scrapbox.main.ScrapboxClient", mock_client):
+        with patch("scrapbox.cli.ScrapboxClient", mock_client):
             main(test_args=["pages", self.PROJECT_NAME])
 
             mock_client.assert_called_once_with(connect_sid=None, pat=None, service_account_key="cs_default-value")
@@ -705,7 +705,7 @@ class TestPatPriority:
     def test_every_credential_reaches_the_client(self) -> None:
         """Test that the CLI resolves each source and leaves the precedence to the client."""
         mock_client = self._mock_client()
-        with patch("scrapbox.main.ScrapboxClient", mock_client):
+        with patch("scrapbox.cli.ScrapboxClient", mock_client):
             main(
                 test_args=[
                     "--connect-sid",
@@ -827,7 +827,7 @@ class TestLogin:
         stdin = MagicMock()
         stdin.isatty.return_value = True
         monkeypatch.setattr("sys.stdin", stdin)
-        with patch("scrapbox.main.getpass.getpass", return_value="pat_abc123\n") as mock_getpass:
+        with patch("scrapbox.cli.getpass.getpass", return_value="pat_abc123\n") as mock_getpass:
             assert main(test_args=["login"]) == 0
 
         mock_getpass.assert_called_once()
@@ -837,7 +837,7 @@ class TestLogin:
     def test_login_does_not_build_a_client(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that login does not construct a ScrapboxClient."""
         self._set_stdin(monkeypatch, "pat_abc123\n")
-        with patch("scrapbox.main.ScrapboxClient") as mock_client:
+        with patch("scrapbox.cli.ScrapboxClient") as mock_client:
             assert main(test_args=["login"]) == 0
 
         mock_client.assert_not_called()
@@ -1014,7 +1014,7 @@ class TestAuthenticatedCommands:
 
         These commands need a credential, so the real API is never called here.
         """
-        with patch("scrapbox.main.ScrapboxClient") as mock_class:
+        with patch("scrapbox.cli.ScrapboxClient") as mock_class:
             instance = MagicMock()
             mock_class.return_value.__enter__.return_value = instance
             yield instance
@@ -1170,7 +1170,7 @@ class TestInfoCommand:
     @pytest.fixture
     def client_class(self) -> Iterator[MagicMock]:
         """Replace the client `info` builds for each credential with a mock."""
-        with patch("scrapbox.main.ScrapboxClient") as mock_class:
+        with patch("scrapbox.cli.ScrapboxClient") as mock_class:
             mock_class.return_value.__enter__.return_value = MagicMock()
             yield mock_class
 

@@ -96,11 +96,11 @@ CLI コマンドの基本的な動作をテストします：
 
 - 外部 API への実際の呼び出しを避けるため、必要に応じてモックを使用します
 - `unittest.mock.patch` を使用してモックを作成します
-- モックは `scrapbox.main.ScrapboxClient` のようにインポート先でパッチします
+- モックは `scrapbox.cli.ScrapboxClient` のようにインポート先でパッチします
 
 例：
 ```python
-with patch("scrapbox.main.ScrapboxClient") as mock_client:
+with patch("scrapbox.cli.ScrapboxClient") as mock_client:
     mock_instance = MagicMock()
     mock_client.return_value.__enter__.return_value = mock_instance
     # テストコード

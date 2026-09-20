@@ -868,7 +868,7 @@ Cosense のエンドポイントではないので資格情報は送らない。
   `BadRequestError: Service account is not available for this project.` まで出て初めて原因が分かる
 - 編集 API の 403 は、そもそもリクエストを送らずに `PersonalAccessTokenRequiredError` で先回りする
 
-CLI (`scrapbox/main.py`) はハンドラを `try` で包み、例外のメッセージを stderr に出して終了コード 1 を返す。
+CLI (`scrapbox/cli.py`) はハンドラを `try` で包み、例外のメッセージを stderr に出して終了コード 1 を返す。
 
 ## 実装との差分メモ
 
