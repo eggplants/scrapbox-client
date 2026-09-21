@@ -10,7 +10,7 @@ import stat
 from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock, call, patch
 
-import httpx
+import httpx2
 import pytest
 
 from scrapbox.cli import (
@@ -537,7 +537,14 @@ class TestConnectSidPriority:
                 pages=[],
             )
 
-            main(test_args=["--connect-sid-file", str(sid_file), "pages", self.PROJECT_NAME])
+            main(
+                test_args=[
+                    "--connect-sid-file",
+                    str(sid_file),
+                    "pages",
+                    self.PROJECT_NAME,
+                ]
+            )
 
             mock_client.assert_called_once_with(connect_sid="file-sid-value", pat=None, service_account_key=None)
 
@@ -599,7 +606,14 @@ class TestConnectSidPriority:
                 pages=[],
             )
 
-            main(test_args=["--connect-sid-file", str(non_existent_file), "pages", self.PROJECT_NAME])
+            main(
+                test_args=[
+                    "--connect-sid-file",
+                    str(non_existent_file),
+                    "pages",
+                    self.PROJECT_NAME,
+                ]
+            )
 
             mock_client.assert_called_once_with(connect_sid=None, pat=None, service_account_key=None)
 
@@ -607,7 +621,14 @@ class TestConnectSidPriority:
         """Test that --connect-sid has priority over --connect-sid-file."""
         with pytest.raises(SystemExit):
             main(
-                test_args=["--connect-sid", "arg-value", "--connect-sid-file", "file-path", "pages", self.PROJECT_NAME]
+                test_args=[
+                    "--connect-sid",
+                    "arg-value",
+                    "--connect-sid-file",
+                    "file-path",
+                    "pages",
+                    self.PROJECT_NAME,
+                ]
             )
 
 
@@ -673,20 +694,45 @@ class TestPatPriority:
         """Test that both credentials reach the client, which resolves the precedence."""
         mock_client = self._mock_client()
         with patch("scrapbox.cli.ScrapboxClient", mock_client):
-            main(test_args=["--connect-sid", "sid-value", "--pat", "pat-value", "pages", self.PROJECT_NAME])
+            main(
+                test_args=[
+                    "--connect-sid",
+                    "sid-value",
+                    "--pat",
+                    "pat-value",
+                    "pages",
+                    self.PROJECT_NAME,
+                ]
+            )
 
             mock_client.assert_called_once_with(connect_sid="sid-value", pat="pat-value", service_account_key=None)
 
     def test_pat_argument_priority_over_file(self) -> None:
         """Test that --pat and --pat-file are mutually exclusive."""
         with pytest.raises(SystemExit):
-            main(test_args=["--pat", "arg-value", "--pat-file", "file-path", "pages", self.PROJECT_NAME])
+            main(
+                test_args=[
+                    "--pat",
+                    "arg-value",
+                    "--pat-file",
+                    "file-path",
+                    "pages",
+                    self.PROJECT_NAME,
+                ]
+            )
 
     def test_service_account_key_from_argument(self) -> None:
         """Test that --service-account-key is passed to the client."""
         mock_client = self._mock_client()
         with patch("scrapbox.cli.ScrapboxClient", mock_client):
-            main(test_args=["--service-account-key", "cs_arg-value", "pages", self.PROJECT_NAME])
+            main(
+                test_args=[
+                    "--service-account-key",
+                    "cs_arg-value",
+                    "pages",
+                    self.PROJECT_NAME,
+                ]
+            )
 
             mock_client.assert_called_once_with(connect_sid=None, pat=None, service_account_key="cs_arg-value")
 
@@ -720,7 +766,9 @@ class TestPatPriority:
             )
 
             mock_client.assert_called_once_with(
-                connect_sid="sid-value", pat="pat-value", service_account_key="cs_key-value"
+                connect_sid="sid-value",
+                pat="pat-value",
+                service_account_key="cs_key-value",
             )
 
     def test_service_account_key_argument_priority_over_file(self) -> None:
@@ -882,7 +930,16 @@ class TestReadCommands:
 
     def test_links_command_two_hops(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Test links command for the 2-hop neighbourhood."""
-        exit_code = main(test_args=["links", self.PROJECT_NAME, self.PAGE_TITLE, "--hop", "2", "--json"])
+        exit_code = main(
+            test_args=[
+                "links",
+                self.PROJECT_NAME,
+                self.PAGE_TITLE,
+                "--hop",
+                "2",
+                "--json",
+            ]
+        )
         assert exit_code == 0
         captured = capfd.readouterr()
         assert '"links2hop"' in captured.out
@@ -893,14 +950,33 @@ class TestReadCommands:
         assert one_page == 0
         expected = capfd.readouterr().out
 
-        exit_code = main(test_args=["links", self.PROJECT_NAME, self.PAGE_TITLE, "--all", "--per-page", "2"])
+        exit_code = main(
+            test_args=[
+                "links",
+                self.PROJECT_NAME,
+                self.PAGE_TITLE,
+                "--all",
+                "--per-page",
+                "2",
+            ]
+        )
 
         assert exit_code == 0
         assert capfd.readouterr().out == expected
 
     def test_links_command_all_json(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Test that --all keeps the JSON output keyed by hop."""
-        exit_code = main(test_args=["links", self.PROJECT_NAME, self.PAGE_TITLE, "--all", "--per-page", "2", "--json"])
+        exit_code = main(
+            test_args=[
+                "links",
+                self.PROJECT_NAME,
+                self.PAGE_TITLE,
+                "--all",
+                "--per-page",
+                "2",
+                "--json",
+            ]
+        )
 
         assert exit_code == 0
         payload = json.loads(capfd.readouterr().out)
@@ -910,7 +986,17 @@ class TestReadCommands:
     def test_links_command_all_two_hops_json(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Test that --all keys the 2-hop output by its own hop."""
         exit_code = main(
-            test_args=["links", self.PROJECT_NAME, self.PAGE_TITLE, "--hop", "2", "--all", "--per-page", "2", "--json"]
+            test_args=[
+                "links",
+                self.PROJECT_NAME,
+                self.PAGE_TITLE,
+                "--hop",
+                "2",
+                "--all",
+                "--per-page",
+                "2",
+                "--json",
+            ]
         )
 
         assert exit_code == 0
@@ -952,7 +1038,17 @@ class TestReadCommands:
 
     def test_search_command_json(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Test search command with JSON output."""
-        exit_code = main(test_args=["search", self.PROJECT_NAME, "リンク", "--or", "--sort", "updated", "--json"])
+        exit_code = main(
+            test_args=[
+                "search",
+                self.PROJECT_NAME,
+                "リンク",
+                "--or",
+                "--sort",
+                "updated",
+                "--json",
+            ]
+        )
         assert exit_code == 0
         captured = capfd.readouterr()
         assert '"searchQuery"' in captured.out
@@ -1033,7 +1129,15 @@ class TestAuthenticatedCommands:
     def test_projects_command(self, client: MagicMock, capfd: pytest.CaptureFixture[str]) -> None:
         """Test projects command."""
         client.get_projects.return_value = ProjectsResponse(
-            projects=[Project(id="1", name="my-project", display_name="Mine", public_visible=False, users_count=3)]
+            projects=[
+                Project(
+                    id="1",
+                    name="my-project",
+                    display_name="Mine",
+                    public_visible=False,
+                    users_count=3,
+                )
+            ]
         )
 
         exit_code = main(test_args=["projects"])
@@ -1082,7 +1186,11 @@ class TestAuthenticatedCommands:
         client.preview_page_edit.return_value = EditPreviewResponse(
             preview_id="p1",
             expire_at="2026-08-09T06:47:53.590Z",
-            page_preview=PagePreview(title="test", persistent=True, lines=[PreviewLine(id="l1", text="hello")]),
+            page_preview=PagePreview(
+                title="test",
+                persistent=True,
+                lines=[PreviewLine(id="l1", text="hello")],
+            ),
         )
 
         exit_code = main(test_args=["edit-preview", "my-project", "--page-id", "pid"])
@@ -1113,7 +1221,8 @@ class TestAuthenticatedCommands:
     def test_edit_submit_command(self, client: MagicMock, capfd: pytest.CaptureFixture[str]) -> None:
         """Test edit-submit command."""
         client.submit_page_edit.return_value = EditSubmitResponse(
-            commit_id="c1", page=SubmittedPage(id="6a78192b3a6ddc39bdf42b47", title="a b")
+            commit_id="c1",
+            page=SubmittedPage(id="6a78192b3a6ddc39bdf42b47", title="a b"),
         )
 
         exit_code = main(test_args=["edit-submit", "my-project", "p1"])
@@ -1187,11 +1296,11 @@ class TestInfoCommand:
         (config_dir / file_name).write_text(f"{credential}\n")
 
     @staticmethod
-    def _http_error(status_code: int, body: dict[str, str]) -> httpx.HTTPStatusError:
+    def _http_error(status_code: int, body: dict[str, str]) -> httpx2.HTTPStatusError:
         """Build the error a failing request would raise, carrying the API's body."""
-        request = httpx.Request("GET", "https://scrapbox.io/api/users/me")
-        response = httpx.Response(status_code, json=body, request=request)
-        return httpx.HTTPStatusError("boom", request=request, response=response)
+        request = httpx2.Request("GET", "https://scrapbox.io/api/users/me")
+        response = httpx2.Response(status_code, json=body, request=request)
+        return httpx2.HTTPStatusError("boom", request=request, response=response)
 
     @staticmethod
     def _me() -> Me:
@@ -1255,7 +1364,11 @@ class TestInfoCommand:
         """Test that the API's own explanation of a refusal is shown."""
         self._save(tmp_path, "pat", self.PAT)
         client.get_me.side_effect = self._http_error(
-            401, {"name": "InvalidPersonalAccessTokenError", "message": "Invalid Personal Access Token."}
+            401,
+            {
+                "name": "InvalidPersonalAccessTokenError",
+                "message": "Invalid Personal Access Token.",
+            },
         )
 
         exit_code = main(test_args=["info"])
@@ -1284,7 +1397,7 @@ class TestInfoCommand:
     ) -> None:
         """Test that a credential is not blamed for a connection that never got through."""
         self._save(tmp_path, "pat", self.PAT)
-        client.get_me.side_effect = httpx.ConnectError("no route to host")
+        client.get_me.side_effect = httpx2.ConnectError("no route to host")
 
         exit_code = main(test_args=["info"])
 
@@ -1298,7 +1411,7 @@ class TestInfoCommand:
     ) -> None:
         """Test that a service account key survives a request that never got through."""
         self._save(tmp_path, "service-account-key", self.SERVICE_ACCOUNT_KEY)
-        client.get_project_users.side_effect = httpx.ConnectError("no route to host")
+        client.get_project_users.side_effect = httpx2.ConnectError("no route to host")
 
         exit_code = main(test_args=["info", "--project", self.PROJECT_NAME])
 
@@ -1400,7 +1513,10 @@ class TestInfoCommand:
         assert "- connect.sid cookie: valid\n" in captured.out
 
     def test_sources_other_than_the_config_directory(
-        self, client: MagicMock, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+        self,
+        client: MagicMock,
+        capfd: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that an argument and an environment variable are named as sources."""
         monkeypatch.setenv("SBC_CONNECT_SID", self.CONNECT_SID)

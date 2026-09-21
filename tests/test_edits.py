@@ -73,8 +73,18 @@ class TestChangesFromOps:
 
     def test_ops_keep_their_order(self) -> None:
         """Test that the changes come out in the order the ops were given."""
-        changes = changes_from_ops([{"delete": "a"}, {"insertBefore": "b", "text": "x"}, {"replace": "c", "text": "y"}])
-        assert [type(change) for change in changes] == [DeleteChange, InsertChange, UpdateChange]
+        changes = changes_from_ops(
+            [
+                {"delete": "a"},
+                {"insertBefore": "b", "text": "x"},
+                {"replace": "c", "text": "y"},
+            ]
+        )
+        assert [type(change) for change in changes] == [
+            DeleteChange,
+            InsertChange,
+            UpdateChange,
+        ]
 
     def test_serializes_with_the_api_field_names(self) -> None:
         """Test that changes serialize back to the underscore-prefixed keys."""

@@ -11,13 +11,19 @@ from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING, Literal, Self, cast
 
-import httpx
+import httpx2
 
 from . import __version__
 from .client import ScrapboxClient, check_page_size, error_detail, page_url
 from .edits import changes_from_ops
 from .exceptions import NotAuthenticatedError
-from .models import InsertChange, Links1hopResponse, Links2hopResponse, PageBase, PageListResponse
+from .models import (
+    InsertChange,
+    Links1hopResponse,
+    Links2hopResponse,
+    PageBase,
+    PageListResponse,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -156,7 +162,10 @@ def _add_page_commands(subparsers: argparse._SubParsersAction) -> None:
     pages_parser.add_argument("project", help="Project name")
     pages_parser.add_argument("--skip", type=int, default=0, help="Number of pages to skip")
     pages_parser.add_argument(
-        "--limit", type=check_page_size_arg, default=100, help="Number of pages to retrieve (1-1000)"
+        "--limit",
+        type=check_page_size_arg,
+        default=100,
+        help="Number of pages to retrieve (1-1000)",
     )
     pages_parser.add_argument(
         "--sort",
@@ -215,9 +224,16 @@ def _add_page_commands(subparsers: argparse._SubParsersAction) -> None:
     links_parser.add_argument("project", help="Project name")
     links_parser.add_argument("title", help="Page title")
     links_parser.add_argument("--hop", type=int, choices=(1, 2), default=1, help="Number of hops (default: 1)")
-    links_parser.add_argument("--search", default=None, help="Keep only neighbours whose body matches this query")
     links_parser.add_argument(
-        "--or", dest="match_any", action="store_true", help="Match any of the words instead of all"
+        "--search",
+        default=None,
+        help="Keep only neighbours whose body matches this query",
+    )
+    links_parser.add_argument(
+        "--or",
+        dest="match_any",
+        action="store_true",
+        help="Match any of the words instead of all",
     )
     links_parser.add_argument(
         "--all",
@@ -226,7 +242,10 @@ def _add_page_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Follow the pagination cursor and retrieve every neighbour",
     )
     links_parser.add_argument(
-        "--per-page", type=check_page_size_arg, default=None, help="Neighbours per request (1-1000, default: 1000)"
+        "--per-page",
+        type=check_page_size_arg,
+        default=None,
+        help="Neighbours per request (1-1000, default: 1000)",
     )
     links_parser.add_argument("--json", "-j", action="store_true", help="Output in JSON format")
     links_parser.set_defaults(handler=cmd_links)
@@ -243,10 +262,16 @@ def _add_search_commands(subparsers: argparse._SubParsersAction) -> None:
     search_parser.add_argument("project", help="Project name")
     search_parser.add_argument("query", help="Search query")
     search_parser.add_argument(
-        "--or", dest="match_any", action="store_true", help="Match any of the words instead of all"
+        "--or",
+        dest="match_any",
+        action="store_true",
+        help="Match any of the words instead of all",
     )
     search_parser.add_argument(
-        "--sort", choices=("pageRank", "updated"), default=None, help="Sort order (default: pageRank)"
+        "--sort",
+        choices=("pageRank", "updated"),
+        default=None,
+        help="Sort order (default: pageRank)",
     )
     search_parser.add_argument("--json", "-j", action="store_true", help="Output in JSON format")
     search_parser.set_defaults(handler=cmd_search)
@@ -719,15 +744,31 @@ def cmd_links(client: ScrapboxClient, args: ScrapboxCliArgs) -> int:
         # Walking the cursor spans several responses, so only the entries survive.
         iterate = client.iter_links_1hop if args.hop == 1 else client.iter_links_2hop
         result = None
-        pages = list(iterate(args.project, args.title, args.search, match_any=args.match_any, per_page=args.per_page))
+        pages = list(
+            iterate(
+                args.project,
+                args.title,
+                args.search,
+                match_any=args.match_any,
+                per_page=args.per_page,
+            )
+        )
     elif args.hop == 1:
         one_hop = client.get_links_1hop(
-            args.project, args.title, args.search, match_any=args.match_any, per_page=args.per_page
+            args.project,
+            args.title,
+            args.search,
+            match_any=args.match_any,
+            per_page=args.per_page,
         )
         result, pages = one_hop, one_hop.links1hop
     else:
         two_hop = client.get_links_2hop(
-            args.project, args.title, args.search, match_any=args.match_any, per_page=args.per_page
+            args.project,
+            args.title,
+            args.search,
+            match_any=args.match_any,
+            per_page=args.per_page,
         )
         result, pages = two_hop, two_hop.links2hop
 
@@ -1169,7 +1210,12 @@ def resolve_connect_sid(args: ScrapboxCliArgs) -> ResolvedCredential:
     Returns:
         The connect.sid and the source it came from.
     """
-    return resolve_credential(args.connect_sid, args.connect_sid_file, CONNECT_SID_FILE_NAME, CONNECT_SID_ENV_VAR)
+    return resolve_credential(
+        args.connect_sid,
+        args.connect_sid_file,
+        CONNECT_SID_FILE_NAME,
+        CONNECT_SID_ENV_VAR,
+    )
 
 
 def resolve_pat(args: ScrapboxCliArgs) -> ResolvedCredential:
@@ -1249,7 +1295,7 @@ def mask_credential(credential: str) -> str:
     return f"{credential[:MASKED_PREFIX_LENGTH]}... ({len(credential)} chars)"
 
 
-def describe_http_error(error: httpx.HTTPStatusError) -> str:
+def describe_http_error(error: httpx2.HTTPStatusError) -> str:
     """Describe a failed request in a single line.
 
     Args:
@@ -1279,10 +1325,13 @@ def check_user_credential(*, connect_sid: str | None = None, pat: str | None = N
             me = client.get_me()
         except NotAuthenticatedError:
             # `users/me` answers 200 to an expired cookie, only leaving out the user.
-            return "invalid", "the API answered as a guest, so it did not accept this credential"
-        except httpx.HTTPStatusError as e:
+            return (
+                "invalid",
+                "the API answered as a guest, so it did not accept this credential",
+            )
+        except httpx2.HTTPStatusError as e:
             return "invalid", describe_http_error(e)
-        except httpx.HTTPError as e:
+        except httpx2.HTTPError as e:
             return "unknown", f"could not reach the API: {e}"
     return "valid", f"{me.name} ({me.display_name})"
 
@@ -1302,11 +1351,14 @@ def check_service_account_key(key: str, project: str | None) -> tuple[Credential
         The status and a line explaining it.
     """
     if project is None:
-        return "unknown", "pass --project <name> to check this key against the project it belongs to"
+        return (
+            "unknown",
+            "pass --project <name> to check this key against the project it belongs to",
+        )
     with ScrapboxClient(service_account_key=key) as client:
         try:
             client.get_project_users(project)
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             detail = describe_http_error(e)
             if WRONG_PROJECT_MESSAGE in detail:
                 return "unknown", (
@@ -1314,7 +1366,7 @@ def check_service_account_key(key: str, project: str | None) -> tuple[Credential
                     f"exist is refused the same way; retry with the key's own project"
                 )
             return "invalid", f"{detail} (project: {project})"
-        except httpx.HTTPError as e:
+        except httpx2.HTTPError as e:
             return "unknown", f"could not reach the API: {e}"
     return "valid", f"accepted by project '{project}'"
 
@@ -1361,15 +1413,28 @@ def collect_credentials(args: ScrapboxCliArgs) -> list[CredentialInfo]:
     # Only one credential is ever sent, so name the one that would win.
     in_use = next((r for r in (pat, service_account_key, connect_sid) if r.value), None)
 
-    checks: tuple[tuple[str, str, ResolvedCredential, Callable[[str], tuple[CredentialStatus, str]]], ...] = (
-        ("personal access token", "pat", pat, lambda value: check_user_credential(pat=value)),
+    checks: tuple[
+        tuple[str, str, ResolvedCredential, Callable[[str], tuple[CredentialStatus, str]]],
+        ...,
+    ] = (
+        (
+            "personal access token",
+            "pat",
+            pat,
+            lambda value: check_user_credential(pat=value),
+        ),
         (
             "service account access key",
             "serviceAccountKey",
             service_account_key,
             lambda value: check_service_account_key(value, args.project),
         ),
-        ("connect.sid cookie", "connectSid", connect_sid, lambda value: check_user_credential(connect_sid=value)),
+        (
+            "connect.sid cookie",
+            "connectSid",
+            connect_sid,
+            lambda value: check_user_credential(connect_sid=value),
+        ),
     )
 
     infos = []
@@ -1417,7 +1482,7 @@ def cmd_info(args: ScrapboxCliArgs) -> int:
                     "pythonImplementation": platform.python_implementation(),
                     "executable": sys.executable,
                     "platform": platform.platform(),
-                    "httpx": httpx.__version__,
+                    "httpx2": httpx2.__version__,
                     "configDir": str(config_dir),
                     "credentials": [
                         {
@@ -1441,7 +1506,7 @@ def cmd_info(args: ScrapboxCliArgs) -> int:
     print(f"python:     {platform.python_version()} ({platform.python_implementation()})")
     print(f"executable: {sys.executable}")
     print(f"platform:   {platform.platform()}")
-    print(f"httpx:      {httpx.__version__}")
+    print(f"httpx2:      {httpx2.__version__}")
     print(f"config dir: {config_dir}{'' if config_dir.is_dir() else ' (does not exist)'}")
     print()
     print("=== credentials ===")

@@ -3,9 +3,13 @@
 from typing import TYPE_CHECKING, Any, Literal, Self
 from urllib.parse import quote, urlparse
 
-import httpx
+import httpx2
 
-from .exceptions import NotAuthenticatedError, PersonalAccessTokenRequiredError, SearchServerUpdatingError
+from .exceptions import (
+    NotAuthenticatedError,
+    PersonalAccessTokenRequiredError,
+    SearchServerUpdatingError,
+)
 from .models import (
     CommitsResponse,
     EditPreviewResponse,
@@ -95,7 +99,7 @@ def check_page_size(value: int, name: str = "page size") -> int:
     return value
 
 
-def error_detail(response: httpx.Response) -> str | None:
+def error_detail(response: httpx2.Response) -> str | None:
     """Read the explanation the API put in an error body.
 
     Most of `/api/` answers `{"name": ..., "message": ...}`; the oEmbed proxy and
@@ -152,7 +156,7 @@ class ScrapboxClient:
         connect_sid: str | None = None,
         pat: str | None = None,
         service_account_key: str | None = None,
-        transport: httpx.BaseTransport | None = None,
+        transport: httpx2.BaseTransport | None = None,
     ) -> None:
         """Initialize the Scrapbox API client.
 
@@ -171,13 +175,13 @@ class ScrapboxClient:
                 no user, so `get_me` and `get_projects` are out of its reach, and
                 `get_project` refuses it as well.
             transport: Transport used by the underlying HTTP client. Intended for
-                tests, which pass an `httpx.MockTransport` so that header handling
+                tests, which pass an `httpx2.MockTransport` so that header handling
                 is still exercised.
         """
         self.pat = pat
         self.service_account_key = None if pat else service_account_key
         self.connect_sid = None if pat or service_account_key else connect_sid
-        self.client = httpx.Client(
+        self.client = httpx2.Client(
             cookies={"connect.sid": self.connect_sid} if self.connect_sid else None,
             follow_redirects=True,
             transport=transport,
@@ -188,7 +192,7 @@ class ScrapboxClient:
             # not receive it.
             self.client.event_hooks["request"].append(self._attach_credential)
 
-    def _attach_credential(self, request: httpx.Request) -> None:
+    def _attach_credential(self, request: httpx2.Request) -> None:
         """Attach the header credential to requests sent to Scrapbox.
 
         Args:
@@ -205,7 +209,13 @@ class ScrapboxClient:
         """Enter the runtime context related to this object."""
         return self
 
-    def __exit__(self, typ: type[BaseException] | None, exc: BaseException | None, tb: TracebackType | None, /) -> None:
+    def __exit__(
+        self,
+        typ: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+        /,
+    ) -> None:
         """Exit the runtime context related to this object."""
         self.client.close()
 
@@ -214,7 +224,7 @@ class ScrapboxClient:
         self.client.close()
 
     @staticmethod
-    def _raise_for_status(response: httpx.Response) -> None:
+    def _raise_for_status(response: httpx2.Response) -> None:
         """Turn an error response into an exception.
 
         The status code alone rarely says what went wrong -- a service account asked
@@ -226,7 +236,7 @@ class ScrapboxClient:
 
         Raises:
             SearchServerUpdatingError: If the search backend is being updated.
-            httpx.HTTPStatusError: If the response carries any other error status.
+            httpx2.HTTPStatusError: If the response carries any other error status.
         """
         if response.status_code == SearchServerUpdatingError.STATUS_CODE:
             # The name adds nothing here: the exception class already carries it.
@@ -237,14 +247,14 @@ class ScrapboxClient:
             raise SearchServerUpdatingError(message)
         try:
             response.raise_for_status()
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             detail = error_detail(response)
             if detail is None:
                 raise
             msg = f"{e}\n{detail}"
-            raise httpx.HTTPStatusError(msg, request=e.request, response=e.response) from None
+            raise httpx2.HTTPStatusError(msg, request=e.request, response=e.response) from None
 
-    def _get(self, path: str, params: Mapping[str, Any] | None = None) -> httpx.Response:
+    def _get(self, path: str, params: Mapping[str, Any] | None = None) -> httpx2.Response:
         """Send a GET request to a path under `BASE_URL`.
 
         Args:
@@ -474,7 +484,12 @@ class ScrapboxClient:
             check_page_size(per_page, "per_page")
         return self._iter_links(
             lambda next_id: self.get_links_1hop(
-                project_name, page_title, search, match_any=match_any, per_page=per_page, next_id=next_id
+                project_name,
+                page_title,
+                search,
+                match_any=match_any,
+                per_page=per_page,
+                next_id=next_id,
             ),
             lambda response: response.links1hop,
         )
@@ -512,7 +527,12 @@ class ScrapboxClient:
             check_page_size(per_page, "per_page")
         return self._iter_links(
             lambda next_id: self.get_links_2hop(
-                project_name, page_title, search, match_any=match_any, per_page=per_page, next_id=next_id
+                project_name,
+                page_title,
+                search,
+                match_any=match_any,
+                per_page=per_page,
+                next_id=next_id,
             ),
             lambda response: response.links2hop,
         )
@@ -768,7 +788,10 @@ class ScrapboxClient:
                 service account access key is set.
         """
         return EditSubmitResponse.model_validate(
-            self._post_json(f"/pages/v2/{project_name}/page-edit-for-ai/submit", {"previewId": preview_id})
+            self._post_json(
+                f"/pages/v2/{project_name}/page-edit-for-ai/submit",
+                {"previewId": preview_id},
+            )
         )
 
     def get_page_text(self, project_name: str, page_title: str) -> str:
@@ -801,9 +824,9 @@ class ScrapboxClient:
 
         response = self.client.get(url, follow_redirects=False)
 
-        if response.status_code == httpx.codes.FOUND:
+        if response.status_code == httpx2.codes.FOUND:
             return response.headers.get("location", "")
-        if response.status_code == httpx.codes.OK:
+        if response.status_code == httpx2.codes.OK:
             return url
         response.raise_for_status()
         return url

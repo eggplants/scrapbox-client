@@ -1,6 +1,6 @@
 """Tests for Scrapbox client."""
 
-import httpx
+import httpx2
 import pytest
 
 from scrapbox.client import PAT_HEADER, SERVICE_ACCOUNT_HEADER, ScrapboxClient
@@ -160,7 +160,7 @@ class TestAuthentication:
     GYAZO_URL = "https://i.gyazo.com/1a2b3c4d5e6f7g8h9i0j.png"
 
     @staticmethod
-    def _build_request(client: ScrapboxClient, url: str) -> httpx.Request:
+    def _build_request(client: ScrapboxClient, url: str) -> httpx2.Request:
         """Build a request through the client so its hooks and cookies apply."""
         request = client.client.build_request("GET", url)
         for hook in client.client.event_hooks["request"]:
@@ -315,7 +315,10 @@ class TestReadEndpoints:
             assert first.pagination.next_id is not None
 
             second = client.get_links_1hop(
-                self.PROJECT_NAME, self.PAGE_TITLE, per_page=per_page, next_id=first.pagination.next_id
+                self.PROJECT_NAME,
+                self.PAGE_TITLE,
+                per_page=per_page,
+                next_id=first.pagination.next_id,
             )
 
             # The cursor moves past the entries already seen.
@@ -387,7 +390,7 @@ class TestReadEndpoints:
 
     def test_get_project_not_found(self) -> None:
         """Test that an unknown project name is an error."""
-        with ScrapboxClient() as client, pytest.raises(httpx.HTTPStatusError):
+        with ScrapboxClient() as client, pytest.raises(httpx2.HTTPStatusError):
             client.get_project("this-project-definitely-does-not-exist-12345")
 
     def test_search_pages_match_any(self) -> None:

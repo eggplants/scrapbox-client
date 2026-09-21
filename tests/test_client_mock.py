@@ -1,6 +1,6 @@
 """Tests for the endpoints that cannot be reached without a credential.
 
-These use an `httpx.MockTransport` rather than the real API, so the request the
+These use an `httpx2.MockTransport` rather than the real API, so the request the
 client builds is still assembled by the real code path: headers, the personal
 access token hook and the JSON body are all exercised.
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from typing import Any, ClassVar
 
-import httpx
+import httpx2
 import pytest
 
 from scrapbox.client import (
@@ -42,7 +42,7 @@ def build_client(
     """Build a client whose requests are answered by a handler.
 
     Args:
-        handler: Callable taking an `httpx.Request` and returning an `httpx.Response`.
+        handler: Callable taking an `httpx2.Request` and returning an `httpx2.Response`.
         pat: Personal access token to authenticate with.
         connect_sid: Cookie to authenticate with.
         service_account_key: Service account access key to authenticate with.
@@ -54,11 +54,11 @@ def build_client(
         connect_sid=connect_sid,
         pat=pat,
         service_account_key=service_account_key,
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
 
 
-def json_handler(payload: Any, recorder: list[httpx.Request] | None = None) -> Any:  # noqa: ANN401
+def json_handler(payload: Any, recorder: list[httpx2.Request] | None = None) -> Any:  # noqa: ANN401
     """Build a handler answering every request with the same JSON payload.
 
     Args:
@@ -69,10 +69,10 @@ def json_handler(payload: Any, recorder: list[httpx.Request] | None = None) -> A
         The handler.
     """
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         if recorder is not None:
             recorder.append(request)
-        return httpx.Response(200, json=payload)
+        return httpx2.Response(200, json=payload)
 
     return handler
 
@@ -94,7 +94,7 @@ class TestAuthenticatedReads:
             "isGuest": False,
             "config": {},
         }
-        requests: list[httpx.Request] = []
+        requests: list[httpx2.Request] = []
         with build_client(json_handler(payload, requests)) as client:
             me = client.get_me()
 
@@ -109,7 +109,7 @@ class TestAuthenticatedReads:
         This endpoint does not answer 401: without a credential it answers 200 with
         `{"isGuest": true}` and no user at all.
         """
-        requests: list[httpx.Request] = []
+        requests: list[httpx2.Request] = []
         with (
             build_client(json_handler({"isGuest": True}, requests), pat=None) as client,
             pytest.raises(NotAuthenticatedError, match="Not authenticated"),
@@ -153,7 +153,10 @@ class TestAuthenticatedReads:
                     "id": "6a78192e2c5aac9b66e0859d",
                     "kind": "page",
                     "changes": [
-                        {"_update": "6a78192b3a6ddc39bdf42b47", "lines": {"text": "hey", "origText": "hello"}},
+                        {
+                            "_update": "6a78192b3a6ddc39bdf42b47",
+                            "lines": {"text": "hey", "origText": "hello"},
+                        },
                         {"linesCount": 1},
                         {"title": "hey", "titleLc": "hey"},
                     ],
@@ -164,7 +167,7 @@ class TestAuthenticatedReads:
                 }
             ]
         }
-        requests: list[httpx.Request] = []
+        requests: list[httpx2.Request] = []
         with build_client(json_handler(payload, requests)) as client:
             commits = client.get_commits("my-project", "6a78192b3a6ddc39bdf42b47", since="abc123")
 
@@ -189,7 +192,7 @@ class TestAuthenticatedReads:
             "contentType": "image/png",
             "size": 242180,
         }
-        requests: list[httpx.Request] = []
+        requests: list[httpx2.Request] = []
         with build_client(json_handler(payload, requests)) as client:
             info = client.get_file_info("https://scrapbox.io/files/5f151efbacbb17001a58f120.png")
 
@@ -200,13 +203,19 @@ class TestAuthenticatedReads:
     def test_search_server_updating_is_typed(self) -> None:
         """Test that the non-standard 490 status becomes a dedicated exception."""
 
-        def handler(_: httpx.Request) -> httpx.Response:
-            return httpx.Response(
+        def handler(_: httpx2.Request) -> httpx2.Response:
+            return httpx2.Response(
                 490,
-                json={"name": "UpdatingSearchServerError", "message": "Updating search server."},
+                json={
+                    "name": "UpdatingSearchServerError",
+                    "message": "Updating search server.",
+                },
             )
 
-        with build_client(handler) as client, pytest.raises(SearchServerUpdatingError, match="Updating search server"):
+        with (
+            build_client(handler) as client,
+            pytest.raises(SearchServerUpdatingError, match="Updating search server"),
+        ):
             client.search_titles_by_vector("my-project", "query")
 
 
@@ -219,33 +228,45 @@ class TestErrorMessages:
 
     def test_named_error_is_reported(self) -> None:
         """Test that both the name and the message of an API error are reported."""
-        payload = {"name": "BadRequestError", "message": "Service account is not available for this project."}
+        payload = {
+            "name": "BadRequestError",
+            "message": "Service account is not available for this project.",
+        }
 
-        def handler(_: httpx.Request) -> httpx.Response:
-            return httpx.Response(400, json=payload)
+        def handler(_: httpx2.Request) -> httpx2.Response:
+            return httpx2.Response(400, json=payload)
 
-        with build_client(handler) as client, pytest.raises(httpx.HTTPStatusError) as excinfo:
+        with (
+            build_client(handler) as client,
+            pytest.raises(httpx2.HTTPStatusError) as excinfo,
+        ):
             client.get_pages("other-project")
 
         assert "BadRequestError: Service account is not available for this project." in str(excinfo.value)
-        assert excinfo.value.response.status_code == httpx.codes.BAD_REQUEST
+        assert excinfo.value.response.status_code == httpx2.codes.BAD_REQUEST
 
     def test_message_only_error_is_reported(self) -> None:
         """Test an error body carrying no name, as the edit endpoints send."""
 
-        def handler(_: httpx.Request) -> httpx.Response:
-            return httpx.Response(404, json={"message": "preview not found or expired"})
+        def handler(_: httpx2.Request) -> httpx2.Response:
+            return httpx2.Response(404, json={"message": "preview not found or expired"})
 
-        with build_client(handler) as client, pytest.raises(httpx.HTTPStatusError, match="preview not found"):
+        with (
+            build_client(handler) as client,
+            pytest.raises(httpx2.HTTPStatusError, match="preview not found"),
+        ):
             client.submit_page_edit("my-project", "000000000000000000000000")
 
     def test_a_body_without_an_explanation_is_left_alone(self) -> None:
-        """Test that a non-JSON error body still raises the plain httpx error."""
+        """Test that a non-JSON error body still raises the plain httpx2 error."""
 
-        def handler(_: httpx.Request) -> httpx.Response:
-            return httpx.Response(500, content=b"<html>oops</html>")
+        def handler(_: httpx2.Request) -> httpx2.Response:
+            return httpx2.Response(500, content=b"<html>oops</html>")
 
-        with build_client(handler) as client, pytest.raises(httpx.HTTPStatusError) as excinfo:
+        with (
+            build_client(handler) as client,
+            pytest.raises(httpx2.HTTPStatusError) as excinfo,
+        ):
             client.get_pages("my-project")
 
         assert "oops" not in str(excinfo.value)
@@ -268,7 +289,7 @@ class TestPageEdit:
 
     def test_preview_sends_changes_and_page_id(self) -> None:
         """Test the request body of a preview for an existing page."""
-        requests: list[httpx.Request] = []
+        requests: list[httpx2.Request] = []
         changes = changes_from_ops([{"insertBefore": "_end", "text": "one\ntwo"}])
         with build_client(json_handler(self.PREVIEW_PAYLOAD, requests)) as client:
             preview = client.preview_page_edit("my-project", changes, page_id=self.PAGE_ID)
@@ -283,7 +304,7 @@ class TestPageEdit:
 
     def test_preview_without_page_id_omits_it(self) -> None:
         """Test that creating a page sends no pageId at all."""
-        requests: list[httpx.Request] = []
+        requests: list[httpx2.Request] = []
         changes = changes_from_ops([{"insertBefore": "_end", "text": "new page"}])
         with build_client(json_handler(self.PREVIEW_PAYLOAD, requests)) as client:
             client.preview_page_edit("my-project", changes)
@@ -297,7 +318,7 @@ class TestPageEdit:
         only: a token-authenticated write is accepted whatever `Origin` says, so
         none is sent.
         """
-        requests: list[httpx.Request] = []
+        requests: list[httpx2.Request] = []
         with build_client(json_handler(self.PREVIEW_PAYLOAD, requests)) as client:
             client.preview_page_edit("my-project", [])
 
@@ -317,12 +338,20 @@ class TestPageEdit:
                 "title": "test",
                 "persistent": True,
                 "commitId": "6a7821775ef194e8f89322cc",
-                "lines": [{"id": self.PAGE_ID, "text": "test", "userId": "u1", "created": 1, "updated": 2}],
+                "lines": [
+                    {
+                        "id": self.PAGE_ID,
+                        "text": "test",
+                        "userId": "u1",
+                        "created": 1,
+                        "updated": 2,
+                    }
+                ],
                 "linesCount": 1,
                 "charsCount": 4,
             },
         }
-        requests: list[httpx.Request] = []
+        requests: list[httpx2.Request] = []
         with build_client(json_handler(payload, requests)) as client:
             result = client.submit_page_edit("my-project", "6a78216d0b154dadc8dcd414")
 
@@ -346,7 +375,15 @@ class TestPageEdit:
                 "id": line_id,
                 "title": "sbc-create-test_2",
                 "persistent": True,
-                "lines": [{"id": line_id, "text": "sbc-create-test_2", "userId": "u1", "created": 1, "updated": 1}],
+                "lines": [
+                    {
+                        "id": line_id,
+                        "text": "sbc-create-test_2",
+                        "userId": "u1",
+                        "created": 1,
+                        "updated": 1,
+                    }
+                ],
             },
         }
         with build_client(json_handler(payload)) as client:
@@ -372,8 +409,12 @@ class TestPageEdit:
         The API takes either header credential here; only a cookie is refused. An
         edit submitted this way is attributed to the service account.
         """
-        requests: list[httpx.Request] = []
-        with build_client(json_handler(self.PREVIEW_PAYLOAD, requests), pat=None, service_account_key="cs_test") as c:
+        requests: list[httpx2.Request] = []
+        with build_client(
+            json_handler(self.PREVIEW_PAYLOAD, requests),
+            pat=None,
+            service_account_key="cs_test",
+        ) as c:
             preview = c.preview_page_edit("my-project", [], page_id=self.PAGE_ID)
 
         assert preview.preview_id == "6a78216d0b154dadc8dcd414"
@@ -393,7 +434,7 @@ class TestPageEdit:
         The API rejects cookie authentication for these endpoints, so there is no
         point in sending the request.
         """
-        requests: list[httpx.Request] = []
+        requests: list[httpx2.Request] = []
         with (
             build_client(json_handler({}, requests), **credentials) as client,
             pytest.raises(PersonalAccessTokenRequiredError, match="personal access token"),
@@ -404,7 +445,7 @@ class TestPageEdit:
 
     def test_submit_without_pat_never_reaches_the_network(self) -> None:
         """Test that submitting without a token fails before a request is sent."""
-        requests: list[httpx.Request] = []
+        requests: list[httpx2.Request] = []
         with (
             build_client(json_handler({}, requests), pat=None) as client,
             pytest.raises(PersonalAccessTokenRequiredError),
@@ -426,10 +467,13 @@ class TestPageSizeValidation:
     @pytest.mark.parametrize("limit", OUT_OF_RANGE)
     def test_get_pages_refuses_an_out_of_range_limit(self, limit: int) -> None:
         """Test that the page list refuses a limit outside the accepted range."""
-        requests: list[httpx.Request] = []
+        requests: list[httpx2.Request] = []
         with (
             build_client(json_handler({}, requests)) as client,
-            pytest.raises(ValueError, match=rf"limit must be between 1 and {MAX_PAGE_SIZE}, got {limit}"),
+            pytest.raises(
+                ValueError,
+                match=rf"limit must be between 1 and {MAX_PAGE_SIZE}, got {limit}",
+            ),
         ):
             client.get_pages("my-project", limit=limit)
 
@@ -438,8 +482,14 @@ class TestPageSizeValidation:
     @pytest.mark.parametrize("limit", [1, 100, MAX_PAGE_SIZE])
     def test_get_pages_accepts_the_range(self, limit: int) -> None:
         """Test that the ends of the accepted range are sent as given."""
-        requests: list[httpx.Request] = []
-        payload = {"projectName": "my-project", "skip": 0, "limit": limit, "count": 0, "pages": []}
+        requests: list[httpx2.Request] = []
+        payload = {
+            "projectName": "my-project",
+            "skip": 0,
+            "limit": limit,
+            "count": 0,
+            "pages": [],
+        }
         with build_client(json_handler(payload, requests)) as client:
             client.get_pages("my-project", limit=limit)
 
@@ -449,7 +499,7 @@ class TestPageSizeValidation:
     @pytest.mark.parametrize("method", ["get_links_1hop", "get_links_2hop"])
     def test_get_links_refuses_an_out_of_range_per_page(self, method: str, per_page: int) -> None:
         """Test that both related pages endpoints refuse an out-of-range page size."""
-        requests: list[httpx.Request] = []
+        requests: list[httpx2.Request] = []
         with (
             build_client(json_handler({}, requests)) as client,
             pytest.raises(ValueError, match=rf"per_page must be between 1 and {MAX_PAGE_SIZE}"),
@@ -465,7 +515,7 @@ class TestPageSizeValidation:
         A generator function would defer the check to the first `next()`, which
         would surface the mistake far from the call that made it.
         """
-        requests: list[httpx.Request] = []
+        requests: list[httpx2.Request] = []
         with (
             build_client(json_handler({}, requests)) as client,
             pytest.raises(ValueError, match="per_page must be between"),
@@ -494,8 +544,8 @@ class TestRelatedPagesPagination:
         """
         by_cursor = {None if index == 0 else f"cursor{index}": page for index, page in enumerate(pages)}
 
-        def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, json=by_cursor[request.url.params.get("nextId")])
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            return httpx2.Response(200, json=by_cursor[request.url.params.get("nextId")])
 
         return handler
 
@@ -512,12 +562,17 @@ class TestRelatedPagesPagination:
         """
         return {
             "links1hop": [{"id": entry, "title": f"page {entry}"} for entry in entries],
-            "pagination": {"perPage": 2, "total": 5, "hasNext": next_id is not None, "nextId": next_id},
+            "pagination": {
+                "perPage": 2,
+                "total": 5,
+                "hasNext": next_id is not None,
+                "nextId": next_id,
+            },
         }
 
     def test_iter_walks_every_page(self) -> None:
         """Test that the iterator concatenates the pages the cursor leads to."""
-        requests: list[httpx.Request] = []
+        requests: list[httpx2.Request] = []
         pages = [
             self.page(["a", "b"], "cursor1"),
             self.page(["c", "d"], "cursor2"),
@@ -525,7 +580,7 @@ class TestRelatedPagesPagination:
         ]
         handler = self.paged_handler(pages)
 
-        def recording(request: httpx.Request) -> httpx.Response:
+        def recording(request: httpx2.Request) -> httpx2.Response:
             requests.append(request)
             return handler(request)
 
@@ -534,15 +589,19 @@ class TestRelatedPagesPagination:
 
         assert [entry.id for entry in found] == ["a", "b", "c", "d", "e"]
         # The first request carries no cursor; each later one carries the previous nextId.
-        assert [request.url.params.get("nextId") for request in requests] == [None, "cursor1", "cursor2"]
+        assert [request.url.params.get("nextId") for request in requests] == [
+            None,
+            "cursor1",
+            "cursor2",
+        ]
         assert all(request.url.params["perPage"] == "2" for request in requests)
 
     def test_iter_is_lazy(self) -> None:
         """Test that pages are fetched only as their entries are consumed."""
-        requests: list[httpx.Request] = []
+        requests: list[httpx2.Request] = []
         handler = self.paged_handler([self.page(["a", "b"], "cursor1"), self.page(["c"], None)])
 
-        def recording(request: httpx.Request) -> httpx.Response:
+        def recording(request: httpx2.Request) -> httpx2.Response:
             requests.append(request)
             return handler(request)
 
@@ -567,8 +626,8 @@ class TestRelatedPagesPagination:
     def test_iter_stops_when_the_cursor_stops_advancing(self) -> None:
         """Test that a cursor pointing at itself does not loop forever."""
 
-        def handler(_: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, json=self.page(["a"], "cursor1"))
+        def handler(_: httpx2.Request) -> httpx2.Response:
+            return httpx2.Response(200, json=self.page(["a"], "cursor1"))
 
         with build_client(handler) as client:
             found = list(client.iter_links_1hop("my-project", "title"))
@@ -594,7 +653,10 @@ class TestUrlHelpers:
         [
             ("5f151efbacbb17001a58f120", "5f151efbacbb17001a58f120"),
             ("5f151efbacbb17001a58f120.png", "5f151efbacbb17001a58f120"),
-            ("https://scrapbox.io/files/5f151efbacbb17001a58f120.tar.gz", "5f151efbacbb17001a58f120"),
+            (
+                "https://scrapbox.io/files/5f151efbacbb17001a58f120.tar.gz",
+                "5f151efbacbb17001a58f120",
+            ),
         ],
     )
     def test_bare_file_id(self, given: str, expected: str) -> None:
@@ -622,11 +684,11 @@ class TestThumbnail:
 
     def test_thumbnail_adds_the_query_parameter(self) -> None:
         """Test that the scaled down version is requested explicitly."""
-        requests: list[httpx.Request] = []
+        requests: list[httpx2.Request] = []
 
-        def handler(request: httpx.Request) -> httpx.Response:
+        def handler(request: httpx2.Request) -> httpx2.Response:
             requests.append(request)
-            return httpx.Response(200, content=b"binary")
+            return httpx2.Response(200, content=b"binary")
 
         with build_client(handler, pat=None) as client:
             client.get_file("5f151efbacbb17001a58f120.png", thumbnail=True)
@@ -635,11 +697,11 @@ class TestThumbnail:
 
     def test_no_thumbnail_parameter_by_default(self) -> None:
         """Test that a plain download asks for the original."""
-        requests: list[httpx.Request] = []
+        requests: list[httpx2.Request] = []
 
-        def handler(request: httpx.Request) -> httpx.Response:
+        def handler(request: httpx2.Request) -> httpx2.Response:
             requests.append(request)
-            return httpx.Response(200, content=b"binary")
+            return httpx2.Response(200, content=b"binary")
 
         with build_client(handler, pat=None) as client:
             client.get_file("5f151efbacbb17001a58f120.png")
