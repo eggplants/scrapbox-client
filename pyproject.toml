@@ -28,6 +28,7 @@ classifiers = [
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3.15",
   "Topic :: Internet :: WWW/HTTP",
   "Topic :: Software Development :: Libraries :: Python Modules",
   "Topic :: Text Processing :: Markup",
@@ -47,7 +48,7 @@ scripts.sbc = "scrapbox.cli:main"
 [dependency-groups]
 dev = [
   "pymarkdownlnt>=0.9.33",
-  "pyproject-fmt>=2.11.1",
+  "pyproject-fmt-py>=0",
   "pytest>=9.0.2",
   "pytest-cov>=7",
 ]
@@ -67,6 +68,8 @@ default-groups = [
   "docs",
 ]
 exclude-newer = "P7D"
+# Own package: no cooldown needed.
+exclude-newer-package = { pyproject-fmt-py = "P0D" }
 preview = true
 
 [tool.ruff]
